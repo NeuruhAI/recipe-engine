@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- UNARMED until the operator runs:
+         launchctl load ~/Library/LaunchAgents/com.neuruh.recipe-engine.daily.plist
+         Plain launchd + bash. Zero AXON dependency. -->
+    <key>Label</key>
+    <string>com.neuruh.recipe-engine.daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/jeramiehicks/repos/recipe-engine/scripts/daily_run.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jeramiehicks/repos/recipe-engine</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jeramiehicks/repos/recipe-engine/data/daily_run.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jeramiehicks/repos/recipe-engine/data/daily_run.err.log</string>
+
+    <!-- if the Mac is asleep at 06:00, launchd fires the job on wake -->
+</dict>
+</plist>
