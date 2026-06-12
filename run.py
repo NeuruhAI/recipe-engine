@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""
+run.py — the full pipeline: fetch -> parse -> attribute -> persist ->
+real-engine evaluate (in-territory only) -> manifest.
+
+  python3 run.py                 # full run
+  python3 run.py --no-engine     # scrape+persist only (no LandOS calls)
+  python3 run.py --run-id X      # explicit run id (default: UTC timestamp)
+
+Env (.env in repo root): DATABASE_URL, LANDOS_ENGINE_URL, LANDOS_SECRET,
+TENANT_ID.
+
+STOP-at-failures doctrine: zero events across ALL anchors = parse failure
+(exit 2, inspect cached html by hand). Node fork = exit 3. Engine errors
+on individual events are counted and reported but don't abort the run —
+the manifest shows engine_called vs engine_ok and the run exits 4 if any
+failed.
+
+NO AXON imports — this module and everything it imports must run
+standalone (scheduler invariant).
+"""
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO))
+
+from recipe_engine.cities import ANCHOR_CITIES, attribute_county, centroid_for
+from recipe_engine.fetch import fetch_anchor
+from recipe_engine.parse import parse_sale_events, canon_keys
+from recipe_engine.engine import LandosEngine, EngineError
+from recipe_engine import persist
+from recipe_engine.persist import NodeForkError
+
+
+def load_env():
+    """Minimal .env loader — no third-party dependency for the scheduler path."""
+    env_file = REPO / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip())
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-engine", action="store_true")
+    ap.add_argument("--run-id", default=None)
+    args = ap.parse_args()
+
+    load_env()
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        print("FATAL: DATABASE_URL not set", file=sys.stderr)
+        return 1
+
+    now = datetime.now(timezone.utc)
+    run_id = args.run_id or now.strftime("%Y%m%dT%H%M%SZ")
+    today = now.strftime("%Y%m%d")
+    cache_dir = REPO / "data" / "cache"
+    manifest_dir = REPO / "data" / "manifests"
+
+    engine = None
+    if not args.no_engine:
+        url = os.environ.get("LANDOS_ENGINE_URL", "http://127.0.0.1:8400")
+        secret = os.environ.get("LANDOS_SECRET")
+        tenant = os.environ.get("TENANT_ID")
+        if not secret or not tenant:
+            print("FATAL: LANDOS_SECRET / TENANT_ID not set", file=sys.stderr)
+            return 1
+        engine = LandosEngine(url, secret, tenant)
+        health = engine.health()
+        if health.get("db") != "up":
+            print(f"FATAL: engine unhealthy: {health}", file=sys.stderr)
+            return 1
+        print(f"engine: {url} healthy, db up")
+
+    counts = dict(anchors=0, pages_fetched=0, cache_hits=0, events_seen=0,
+                  events_upserted=0, in_territory=0, report_only=0,
+                  engine_called=0, engine_ok=0)
+    per_anchor = {}
+    node_records = []     # (listing_id, parcel_apn, node_id) — the gate proof
+    engine_failures = []
+    seen_listing_ids = set()
+
+    conn = persist.connect(database_url)
+    try:
+        cur = conn.cursor()
+        for slug, city_path in ANCHOR_CITIES.items():
+            counts["anchors"] += 1
+            html, from_cache, final_url = fetch_anchor(slug, city_path, cache_dir, today)
+            counts["cache_hits" if from_cache else "pages_fetched"] += 1
+
+            anchor_events = 0
+            for ev in parse_sale_events(html):
+                anchor_events += 1
+                if ev["listing_id"] in seen_listing_ids:
+                    continue  # same sale appears on multiple market pages
+                seen_listing_ids.add(ev["listing_id"])
+                counts["events_seen"] += 1
+
+                county_slug, in_terr = attribute_county(
+                    ev["state"], ev["postal_code"], ev["city"])
+                cen = centroid_for(ev["state"], ev["city"]) if in_terr else None
+                lat, lng = (cen if cen else (None, None))
+                geo = "centroid" if cen else "none"
+
+                provenance = f"estatesales.net:{slug}:{run_id}"
+                if persist.upsert_event(cur, ev, county_slug, in_terr,
+                                        lat, lng, geo, provenance):
+                    counts["events_upserted"] += 1
+                counts["in_territory" if in_terr else "report_only"] += 1
+
+                if engine and in_terr:
+                    keys = canon_keys(ev["listing_id"])
+                    counts["engine_called"] += 1
+                    try:
+                        result = engine.evaluate(
+                            keys["parcel_apn"], keys["owner_hash"],
+                            county_slug, ev["state"])
+                        persist.record_node_id(
+                            cur, ev["listing_id"], result["node_id"])
+                        counts["engine_ok"] += 1
+                        node_records.append(
+                            (ev["listing_id"], keys["parcel_apn"],
+                             result["node_id"]))
+                    except EngineError as e:
+                        engine_failures.append(str(e))
+
+            per_anchor[slug] = {"events_on_page": anchor_events,
+                                "from_cache": from_cache,
+                                "final_url": final_url}
+            print(f"{slug}: {anchor_events} events "
+                  f"({'cache' if from_cache else 'fetched'})")
+
+        if counts["events_seen"] == 0:
+            conn.rollback()
+            print("FATAL: zero events across ALL anchors = parse failure. "
+                  "Inspect data/cache/*.html ld+json by hand.", file=sys.stderr)
+            return 2
+
+        manifest = {
+            "run_id": run_id,
+            "started_at": now.isoformat(),
+            "source": "estatesales.net",
+            "counts": counts,
+            "per_anchor": per_anchor,
+            "node_records": [
+                {"listing_id": l, "parcel_apn": p, "node_id": n}
+                for l, p, n in node_records
+            ],
+            "engine_failures": engine_failures,
+        }
+        sha, path = persist.write_manifest(cur, manifest_dir, run_id, manifest)
+        conn.commit()
+        print(f"\nmanifest: {path}")
+        print(f"manifest sha256: {sha}")
+        print(json.dumps(counts, indent=2))
+        if engine_failures:
+            print(f"\nENGINE FAILURES ({len(engine_failures)}):", file=sys.stderr)
+            for f in engine_failures:
+                print(f"  {f}", file=sys.stderr)
+            return 4
+        return 0
+
+    except NodeForkError as e:
+        conn.rollback()
+        print(f"FATAL (node fork): {e}", file=sys.stderr)
+        return 3
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
