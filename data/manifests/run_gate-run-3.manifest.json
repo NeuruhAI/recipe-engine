@@ -1,0 +1,91 @@
+{
+  "counts": {
+    "anchors": 13,
+    "cache_hits": 13,
+    "engine_called": 1,
+    "engine_ok": 1,
+    "events_seen": 37,
+    "events_upserted": 0,
+    "in_territory": 0,
+    "pages_fetched": 0,
+    "report_only": 37
+  },
+  "engine_failures": [],
+  "node_records": [
+    {
+      "listing_id": "4942260",
+      "node_id": "31291322-adcb-46a5-93ef-9fb2a9c59f4b",
+      "parcel_apn": "estate-4942260"
+    }
+  ],
+  "per_anchor": {
+    "benton-harbor": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "berrien-springs": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "buchanan": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "coloma": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "dowagiac": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "edwardsburg": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "elkhart": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "granger": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "mishawaka": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "new-buffalo": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "niles": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "saint-joseph-mi": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    },
+    "south-bend": {
+      "events_on_page": 20,
+      "final_url": null,
+      "from_cache": true
+    }
+  },
+  "run_id": "gate-run-3",
+  "source": "estatesales.net",
+  "started_at": "2026-06-12T21:43:25.962390+00:00"
+}

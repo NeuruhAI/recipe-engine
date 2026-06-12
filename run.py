@@ -52,6 +52,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-engine", action="store_true")
     ap.add_argument("--run-id", default=None)
+    ap.add_argument(
+        "--gate-listing", default=None, metavar="LISTING_ID",
+        help="Push this ONE listing through the engine leg even if it is "
+             "report-only. Gate-proof escape hatch for when the territory "
+             "has zero live sales; the node it creates is flagged in the "
+             "receipt. Never expands TERRITORY.")
     args = ap.parse_args()
 
     load_env()
@@ -117,7 +123,7 @@ def main():
                     counts["events_upserted"] += 1
                 counts["in_territory" if in_terr else "report_only"] += 1
 
-                if engine and in_terr:
+                if engine and (in_terr or ev["listing_id"] == args.gate_listing):
                     keys = canon_keys(ev["listing_id"])
                     counts["engine_called"] += 1
                     try:

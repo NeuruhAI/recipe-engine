@@ -1,0 +1,85 @@
+{
+  "counts": {
+    "anchors": 13,
+    "cache_hits": 0,
+    "engine_called": 0,
+    "engine_ok": 0,
+    "events_seen": 37,
+    "events_upserted": 37,
+    "in_territory": 0,
+    "pages_fetched": 13,
+    "report_only": 37
+  },
+  "engine_failures": [],
+  "node_records": [],
+  "per_anchor": {
+    "benton-harbor": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/MI/Niles-Benton-Harbor",
+      "from_cache": false
+    },
+    "berrien-springs": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/MI/Niles-Benton-Harbor",
+      "from_cache": false
+    },
+    "buchanan": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/MI/Niles-Benton-Harbor",
+      "from_cache": false
+    },
+    "coloma": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/MI/Niles-Benton-Harbor",
+      "from_cache": false
+    },
+    "dowagiac": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/IN/South-Bend",
+      "from_cache": false
+    },
+    "edwardsburg": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/IN/South-Bend",
+      "from_cache": false
+    },
+    "elkhart": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/IN/Elkhart",
+      "from_cache": false
+    },
+    "granger": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/IN/South-Bend",
+      "from_cache": false
+    },
+    "mishawaka": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/IN/South-Bend",
+      "from_cache": false
+    },
+    "new-buffalo": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/MI/Niles-Benton-Harbor",
+      "from_cache": false
+    },
+    "niles": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/MI/Niles-Benton-Harbor",
+      "from_cache": false
+    },
+    "saint-joseph-mi": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/MI/Niles-Benton-Harbor",
+      "from_cache": false
+    },
+    "south-bend": {
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/IN/South-Bend",
+      "from_cache": false
+    }
+  },
+  "run_id": "gate-run-1",
+  "source": "estatesales.net",
+  "started_at": "2026-06-12T21:38:20.286192+00:00"
+}
