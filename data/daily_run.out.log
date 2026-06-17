@@ -1,0 +1,81 @@
+benton-harbor: 20 events (fetched)
+saint-joseph-mi: 20 events (fetched)
+niles: 20 events (fetched)
+buchanan: 20 events (fetched)
+berrien-springs: 20 events (fetched)
+coloma: 20 events (fetched)
+new-buffalo: 20 events (fetched)
+south-bend: 20 events (fetched)
+mishawaka: 20 events (fetched)
+granger: 20 events (fetched)
+dowagiac: 20 events (fetched)
+edwardsburg: 20 events (fetched)
+elkhart: 20 events (fetched)
+
+manifest: /Users/jeramiehicks/repos/recipe-engine/data/manifests/run_daily-20260615T100000Z.manifest.json
+manifest sha256: 524bc6871d8106ed20a94c3d527a24bafa437d1a62b1bb37d3dd717d0ace5551
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 26,
+  "events_upserted": 24,
+  "in_territory": 2,
+  "report_only": 24,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+benton-harbor: 20 events (fetched)
+saint-joseph-mi: 20 events (fetched)
+niles: 20 events (fetched)
+buchanan: 20 events (fetched)
+berrien-springs: 20 events (fetched)
+coloma: 20 events (fetched)
+new-buffalo: 20 events (fetched)
+south-bend: 20 events (fetched)
+mishawaka: 20 events (fetched)
+granger: 20 events (fetched)
+dowagiac: 20 events (fetched)
+edwardsburg: 20 events (fetched)
+elkhart: 20 events (fetched)
+
+manifest: /Users/jeramiehicks/repos/recipe-engine/data/manifests/run_daily-20260616T100000Z.manifest.json
+manifest sha256: 2827fd91617afe6545a54380447ea469f2dae45d0b158bd8895a9a49971b34db
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 24,
+  "events_upserted": 6,
+  "in_territory": 2,
+  "report_only": 22,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+benton-harbor: 20 events (fetched)
+saint-joseph-mi: 20 events (fetched)
+niles: 20 events (fetched)
+buchanan: 20 events (fetched)
+berrien-springs: 20 events (fetched)
+coloma: 20 events (fetched)
+new-buffalo: 20 events (fetched)
+south-bend: 20 events (fetched)
+mishawaka: 20 events (fetched)
+granger: 20 events (fetched)
+dowagiac: 20 events (fetched)
+edwardsburg: 20 events (fetched)
+elkhart: 20 events (fetched)
+
+manifest: /Users/jeramiehicks/repos/recipe-engine/data/manifests/run_daily-20260617T100000Z.manifest.json
+manifest sha256: 2ab2cea0b5eeaae711cd897254297db965a9cd8422e4088c9dda302eea433de3
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 25,
+  "events_upserted": 6,
+  "in_territory": 2,
+  "report_only": 23,
+  "engine_called": 0,
+  "engine_ok": 0
+}
