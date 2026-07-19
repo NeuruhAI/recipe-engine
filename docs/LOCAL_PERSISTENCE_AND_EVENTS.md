@@ -14,3 +14,8 @@ SQLite (`SqliteStore`) — local/temp/gitignored only.
 ## Schema version
 
 `fr.sqlite.v1` — local init only. No production migrations. No Supabase. No estate-sale Postgres.
+
+
+## P1.1
+
+Full mission projection rebuilds from the event stream (mission_created anchors body; deliverable/plan/approval body events apply deterministically). verify_integrity rebuilds and compares.

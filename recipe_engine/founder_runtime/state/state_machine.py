@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from recipe_engine.founder_runtime.errors import StateTransitionInvalid
-from recipe_engine.founder_runtime.contracts.events import MissionEvent, EventType
+from recipe_engine.founder_runtime.contracts.events import MissionEvent, EventType, SAME_STATE_EVENT_TYPES
 from .states import MissionState, TERMINAL_STATES
 from .transitions import is_transition_allowed
 
@@ -45,6 +45,17 @@ class StateMachine:
                     {"next": next_state.value},
                 )
             return
+        # same-state body/audit events
+        if prior == next_state:
+            if event is not None and event.event_type in SAME_STATE_EVENT_TYPES:
+                return
+            raise StateTransitionInvalid(
+                "same-state transition requires allowed body/audit event type",
+                {
+                    "prior": prior.value,
+                    "event_type": None if event is None else event.event_type.value,
+                },
+            )
         if prior in TERMINAL_STATES:
             raise StateTransitionInvalid(
                 "terminal state cannot transition",

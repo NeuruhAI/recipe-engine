@@ -31,6 +31,14 @@ from recipe_engine.founder_runtime.evidence.validation import assert_valid_recei
 from recipe_engine.founder_runtime.evidence.receipts import expected_step_input_hash
 from recipe_engine.founder_runtime.runtime.completion import verify_completion
 from recipe_engine.founder_runtime.ids import hash_payload, stable_id
+from recipe_engine.founder_runtime.errors import FounderRuntimeError
+from recipe_engine.founder_runtime.state.states import MissionState as _MS
+
+class PlanCompileFailed(FounderRuntimeError):
+    def __init__(self, detail: str):
+        super().__init__("COMPLETION_CRITERIA_FAILED", detail, {"error_class": "plan_compile_failed"})
+        self.detail = detail
+
 from recipe_engine.founder_runtime.events.replay import replay_mission
 
 
@@ -106,9 +114,8 @@ def run_system_status_slice(
     mission = runtime.transition(mid, MissionState.EXECUTING, reason="execute_fixture_steps")
 
     plan_id = stable_id("plan", mid, "system_status")
-    mission.plan_id = plan_id
-    # persist plan_id on mission body
-    runtime.set_deliverable_status(mid, "del_status_report", DeliverableStatus.PENDING)
+    runtime.bind_plan_id(mid, plan_id)
+    mission = runtime.get_mission(mid)
 
     completed: list[str] = []
     pending = list(SLICE_STEPS)
@@ -373,20 +380,18 @@ def run_system_status_slice(
                     schema_version=SV_CAPABILITY,
                     capabilities=("observe.read", "research.read", "analysis.local"),
                 )
-                # CapabilityCatalog shape may differ — handle carefully
                 try:
                     plan = compile_execution_plan(packet, sid, catalog, config=default_config())
                     plan_dict = plan.to_dict()
                 except Exception as e:
+                    # B4: never complete through swallowed plan failure
+                    err_detail = f"{type(e).__name__}: {e}"[:500]
                     plan_dict = {
-                        "plan_id": plan_id,
-                        "scenario_id": sid,
-                        "proposal_only": True,
-                        "note": "plan_compile_fallback",
-                        "error": str(e),
-                        "selected_strategy": sid,
-                        "next_safe_action": packet.recommended_next_safe_action,
+                        "failed": True,
+                        "error_class": "plan_compile_failed",
+                        "detail": err_detail,
                     }
+                    raise PlanCompileFailed(err_detail) from e
             out_extra = plan_dict
         else:
             out_extra = {}
@@ -429,7 +434,23 @@ def run_system_status_slice(
     for i, step in enumerate(SLICE_STEPS):
         if stop_after_steps is not None and i >= stop_after_steps:
             break
-        _run_step(step)
+        try:
+            _run_step(step)
+        except PlanCompileFailed as pcf:
+            mission = runtime.record_plan_compile_failure(
+                mid, detail=pcf.detail, error_class="plan_compile_failed", final=True,
+            )
+            return {
+                "mission_id": mid,
+                "status": "failed",
+                "final_state": mission.current_state.value,
+                "error_class": "plan_compile_failed",
+                "detail": pcf.detail,
+                "plan_id": plan_id,
+                "mutation": False,
+                "adapter_mode": "fixture",
+                "completion_hash": None,
+            }
         if simulate_power_loss_after_steps is not None and (i + 1) >= simulate_power_loss_after_steps:
             return {
                 "mission_id": mid,
@@ -438,6 +459,21 @@ def run_system_status_slice(
                 "plan_id": plan_id,
                 "db_path": str(runtime.store.path),
             }
+
+    if isinstance(plan_dict, dict) and plan_dict.get("failed"):
+        mission = runtime.record_plan_compile_failure(
+            mid, detail=str(plan_dict.get("detail") or "plan failed"), final=True,
+        )
+        return {
+            "mission_id": mid,
+            "status": "failed",
+            "final_state": mission.current_state.value,
+            "error_class": "plan_compile_failed",
+            "detail": plan_dict.get("detail"),
+            "plan_id": plan_id,
+            "mutation": False,
+            "adapter_mode": "fixture",
+        }
 
     if skip_completion or (stop_after_steps is not None and stop_after_steps < len(SLICE_STEPS)):
         return {

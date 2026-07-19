@@ -1,4 +1,4 @@
-"""Replay append-only events and validate projection."""
+"""Replay append-only events and validate full projection against event log."""
 
 from __future__ import annotations
 
@@ -6,8 +6,11 @@ from typing import Any
 
 from recipe_engine.founder_runtime.ids import hash_payload
 from recipe_engine.founder_runtime.errors import PersistenceConflict, MissionNotFound
-from recipe_engine.founder_runtime.state.states import MissionState
-from recipe_engine.founder_runtime.state.state_machine import StateMachine
+from recipe_engine.founder_runtime.events.projector import (
+    rebuild_mission_from_events,
+    projection_hash,
+)
+from recipe_engine.founder_runtime.serialization import to_canonical
 
 
 def replay_mission(store, mission_id: str) -> dict[str, Any]:
@@ -15,37 +18,46 @@ def replay_mission(store, mission_id: str) -> dict[str, Any]:
     if mission is None:
         raise MissionNotFound("mission not found for replay", {"mission_id": mission_id})
     events = store.list_events(mission_id)
-    prior = None
-    for ev in events:
-        # verify hash
-        stored = ev.event_hash
-        if not ev.verify_hash():
-            raise PersistenceConflict("event hash tamper detected", {"event_id": ev.event_id})
-        # restore hash after verify (verify_hash recomputes)
-        if stored and stored != ev.event_hash:
-            raise PersistenceConflict("event hash mismatch", {"event_id": ev.event_id})
-        StateMachine.assert_transition(prior, ev.next_state, event=ev, require_event=True)
-        prior = ev.next_state
-    final = prior if prior is not None else mission.current_state
-    if final != mission.current_state:
+    rebuilt = rebuild_mission_from_events(events)
+    stored_body = mission.to_dict()
+    rebuilt_body = rebuilt.to_dict()
+    # Compare full projection (canonical hash)
+    stored_hash = hash_payload(stored_body)
+    rebuilt_hash = hash_payload(rebuilt_body)
+    if rebuilt_hash != stored_hash:
+        raise PersistenceConflict(
+            "rebuilt projection diverges from stored body",
+            {
+                "mission_id": mission_id,
+                "rebuilt_hash": rebuilt_hash,
+                "stored_hash": stored_hash,
+                "rebuilt_state": rebuilt.current_state.value,
+                "stored_state": mission.current_state.value,
+            },
+        )
+    if rebuilt.current_state != mission.current_state:
         raise PersistenceConflict(
             "replay final state != projection",
-            {"replay": final.value, "projection": mission.current_state.value},
+            {"replay": rebuilt.current_state.value, "projection": mission.current_state.value},
         )
-    body = mission.to_dict()
+    if rebuilt.version != mission.version:
+        raise PersistenceConflict(
+            "replay version != projection version",
+            {"replay": rebuilt.version, "projection": mission.version},
+        )
     return {
         "mission_id": mission_id,
         "event_count": len(events),
-        "final_state": final.value,
-        "mission_version": mission.version,
-        "projection_hash": hash_payload(body),
-        "mission": body,
+        "final_state": rebuilt.current_state.value,
+        "mission_version": rebuilt.version,
+        "projection_hash": rebuilt_hash,
+        "mission": rebuilt_body,
         "events": [e.to_dict() for e in events],
+        "rebuilt_matches_stored": True,
     }
 
 
-def project_state_from_events(events) -> MissionState | None:
-    state = None
-    for ev in events:
-        state = ev.next_state
-    return state
+def project_state_from_events(events):
+    if not events:
+        return None
+    return rebuild_mission_from_events(events).current_state

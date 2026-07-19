@@ -18,8 +18,12 @@ class EventType(str, Enum):
     STATE_TRANSITION = "state_transition"
     CONTEXT_RESOLVED = "context_resolved"
     PLAN_COMPILED = "plan_compiled"
+    PLAN_BOUND = "plan_bound"
+    PLAN_COMPILE_FAILED = "plan_compile_failed"
     GOVERNANCE_RECORDED = "governance_recorded"
     APPROVAL_RECORDED = "approval_recorded"
+    APPROVAL_CONSUMED = "approval_consumed"
+    DELIVERABLE_STATUS_CHANGED = "deliverable_status_changed"
     STEP_STARTED = "step_started"
     STEP_COMPLETED = "step_completed"
     RECEIPT_RECORDED = "receipt_recorded"
@@ -34,6 +38,23 @@ class EventType(str, Enum):
     EXCEPTION_DISCLOSED = "exception_disclosed"
     SUPERSEDED = "superseded"
     CANCELLED = "cancelled"
+    FAILURE_RECORDED = "failure_recorded"
+
+
+# Same-state audit/body events — not table transitions; prior_state == next_state
+SAME_STATE_EVENT_TYPES: frozenset[EventType] = frozenset({
+    EventType.APPROVAL_RECORDED,
+    EventType.APPROVAL_CONSUMED,
+    EventType.DELIVERABLE_STATUS_CHANGED,
+    EventType.PLAN_BOUND,
+    EventType.RECEIPT_RECORDED,
+    EventType.CHECKPOINT_RECORDED,
+    EventType.ARTIFACT_REGISTERED,
+    EventType.GOVERNANCE_RECORDED,
+    EventType.SIDE_EFFECT_MARKED,
+    EventType.SIDE_EFFECT_RECONCILED,
+    EventType.EXCEPTION_DISCLOSED,
+})
 
 
 @dataclass
@@ -120,7 +141,24 @@ class MissionEvent:
         )
 
     def verify_hash(self) -> bool:
+        """Compare stored event_hash to recomputed value without losing original."""
         expected = self.event_hash
-        current = self.compute_hash()
-        # restore after recompute same
-        return expected == current
+        # recompute into temp without relying on mutated equality
+        body = {
+            "schema_version": self.schema_version,
+            "event_id": self.event_id,
+            "mission_id": self.mission_id,
+            "prior_state": None if self.prior_state is None else self.prior_state.value,
+            "next_state": self.next_state.value,
+            "event_type": self.event_type.value,
+            "actor": self.actor,
+            "reason": self.reason,
+            "evidence_refs": list(self.evidence_refs),
+            "timestamp": self.timestamp,
+            "idempotency_key": self.idempotency_key,
+            "causation_id": self.causation_id,
+            "correlation_id": self.correlation_id,
+            "payload": dict(self.payload),
+        }
+        recomputed = hash_payload(body)
+        return bool(expected) and expected == recomputed

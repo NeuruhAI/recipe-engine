@@ -132,8 +132,15 @@ class SqliteStore:
         event: MissionEvent,
         *,
         expected_version: int,
-        mission_body: Mission,
+        mission_body: Mission | None = None,
     ) -> MissionEvent:
+        """Append event and update projection atomically.
+
+        Projection body is derived by applying the event to the stored mission
+        (or mission_created payload). CAS enforces expected_version with rowcount.
+        """
+        from recipe_engine.founder_runtime.events.projector import apply_event, projection_hash
+
         c = self._c()
         if not event.event_hash:
             event.compute_hash()
@@ -150,7 +157,7 @@ class SqliteStore:
                 ev.sequence = existing["sequence"]
                 return ev
             row = c.execute(
-                "SELECT version, projection_hash FROM missions WHERE mission_id=?",
+                "SELECT version, body_json, projection_hash FROM missions WHERE mission_id=?",
                 (event.mission_id,),
             ).fetchone()
             if row is None:
@@ -162,15 +169,27 @@ class SqliteStore:
                     "optimistic version conflict",
                     {"expected": expected_version, "actual": row["version"], "mission_id": event.mission_id},
                 )
+            current = Mission.from_dict(json.loads(row["body_json"]))
+            # Prefer pure event application; mission_body only used as optional base for create
+            base = None if event.event_type.value == "mission_created" else current
+            if event.event_type.value == "mission_created":
+                # ensure payload has mission body
+                if not (event.payload or {}).get("mission_body"):
+                    # fallback: use stored or supplied
+                    body_src = mission_body.to_dict() if mission_body is not None else current.to_dict()
+                    event.payload = dict(event.payload or {})
+                    event.payload["mission_body"] = body_src
+                    event.compute_hash()
+            applied = apply_event(base, event)
             new_version = expected_version + 1
-            mission_body.version = new_version
-            mission_body.current_state = event.next_state
-            mission_body.updated_at = event.timestamp
+            applied.version = new_version
+            applied.current_state = event.next_state
+            applied.updated_at = event.timestamp
             if event.next_state.value in (
                 "COMPLETED", "COMPLETED_WITH_EXCEPTIONS", "FAILED_FINAL", "CANCELLED", "SUPERSEDED"
             ):
-                mission_body.completed_at = event.timestamp
-            body = mission_body.to_dict()
+                applied.completed_at = event.timestamp
+            body = applied.to_dict()
             proj = hash_payload(body)
             event_body = event.to_dict()
             cur = c.execute(
@@ -193,27 +212,46 @@ class SqliteStore:
                 ),
             )
             seq = cur.lastrowid
-            c.execute(
+            # CAS projection update — must affect exactly one row
+            cur2 = c.execute(
                 """UPDATE missions SET version=?, current_state=?, body_json=?, updated_at=?,
-                   completed_at=?, projection_hash=? WHERE mission_id=?""",
+                   completed_at=?, projection_hash=? WHERE mission_id=? AND version=?""",
                 (
                     new_version,
                     event.next_state.value,
                     to_canonical(body),
                     event.timestamp,
-                    mission_body.completed_at,
+                    applied.completed_at,
                     proj,
                     event.mission_id,
+                    expected_version,
                 ),
             )
+            if cur2.rowcount != 1:
+                c.execute("ROLLBACK")
+                raise PersistenceConflict(
+                    "CAS rowcount failed on mission projection update",
+                    {"mission_id": event.mission_id, "expected_version": expected_version, "rowcount": cur2.rowcount},
+                )
             c.execute("COMMIT")
             event.sequence = seq
+            # mutate caller's mission_body if provided so callers see updates
+            if mission_body is not None:
+                mission_body.version = applied.version
+                mission_body.current_state = applied.current_state
+                mission_body.updated_at = applied.updated_at
+                mission_body.completed_at = applied.completed_at
+                mission_body.deliverables = applied.deliverables
+                mission_body.plan_id = applied.plan_id
+                mission_body.extensions = applied.extensions
             return event
         except (PersistenceConflict, MissionNotFound):
             raise
         except sqlite3.IntegrityError as e:
-            c.execute("ROLLBACK")
-            # concurrent duplicate idempotency
+            try:
+                c.execute("ROLLBACK")
+            except Exception:
+                pass
             existing = c.execute(
                 "SELECT body_json, sequence FROM mission_events WHERE mission_id=? AND idempotency_key=?",
                 (event.mission_id, event.idempotency_key),
@@ -568,32 +606,38 @@ class SqliteStore:
         expires_at: str,
         mission_id: str | None = None,
     ) -> bool:
+        """Acquire a new lock lease.
+
+        Unexpired locks cannot be stolen — even by the same owner string —
+        unless the exact token is presented (renew path).
+        Expired locks may be taken over by any owner with a new token.
+        """
         c = self._c()
         try:
             c.execute("BEGIN IMMEDIATE")
             row = c.execute("SELECT * FROM runtime_locks WHERE lock_name=?", (lock_name,)).fetchone()
             if row:
-                if row["expires_at"] > acquired_at and row["owner"] != owner:
+                unexpired = row["expires_at"] > acquired_at
+                if unexpired:
+                    # renew only with exact owner+token
+                    if row["owner"] == owner and row["token"] == token:
+                        c.execute(
+                            "UPDATE runtime_locks SET expires_at=?, acquired_at=? WHERE lock_name=? AND owner=? AND token=?",
+                            (expires_at, acquired_at, lock_name, owner, token),
+                        )
+                        c.execute("COMMIT")
+                        return True
+                    # any other attempt on unexpired lock fails closed
                     c.execute("ROLLBACK")
                     return False
-                if row["owner"] == owner and row["token"] == token:
-                    c.execute(
-                        "UPDATE runtime_locks SET expires_at=?, acquired_at=? WHERE lock_name=?",
-                        (expires_at, acquired_at, lock_name),
-                    )
-                    c.execute("COMMIT")
-                    return True
-                # expired or same owner re-acquire
-                if row["expires_at"] <= acquired_at or row["owner"] == owner:
-                    c.execute(
-                        """UPDATE runtime_locks SET owner=?, token=?, acquired_at=?, expires_at=?, mission_id=?
-                           WHERE lock_name=?""",
-                        (owner, token, acquired_at, expires_at, mission_id, lock_name),
-                    )
-                    c.execute("COMMIT")
-                    return True
-                c.execute("ROLLBACK")
-                return False
+                # expired — takeover with new token/owner
+                c.execute(
+                    """UPDATE runtime_locks SET owner=?, token=?, acquired_at=?, expires_at=?, mission_id=?
+                       WHERE lock_name=?""",
+                    (owner, token, acquired_at, expires_at, mission_id, lock_name),
+                )
+                c.execute("COMMIT")
+                return True
             c.execute(
                 """INSERT INTO runtime_locks(lock_name, owner, mission_id, acquired_at, expires_at, token)
                    VALUES (?,?,?,?,?,?)""",
@@ -602,11 +646,28 @@ class SqliteStore:
             c.execute("COMMIT")
             return True
         except sqlite3.IntegrityError:
-            c.execute("ROLLBACK")
+            try:
+                c.execute("ROLLBACK")
+            except Exception:
+                pass
             return False
         except Exception:
-            c.execute("ROLLBACK")
+            try:
+                c.execute("ROLLBACK")
+            except Exception:
+                pass
             raise
+
+    def renew_lock(
+        self,
+        lock_name: str,
+        owner: str,
+        token: str,
+        acquired_at: str,
+        expires_at: str,
+    ) -> bool:
+        """Renew only the exact owner+token lease."""
+        return self.acquire_lock(lock_name, owner, token, acquired_at, expires_at)
 
     def release_lock(self, lock_name: str, owner: str, token: str) -> bool:
         c = self._c()
@@ -676,55 +737,67 @@ class SqliteStore:
         )
 
     def verify_integrity(self) -> dict[str, Any]:
+        """Validate event hashes and that stored projection matches event rebuild."""
+        from recipe_engine.founder_runtime.events.projector import (
+            rebuild_mission_from_events,
+            projection_hash,
+        )
         c = self._c()
         issues: list[str] = []
-        # foreign keys already enforced; check event hash consistency sample
-        events = c.execute("SELECT body_json, event_hash FROM mission_events").fetchall()
-        for e in events:
+        events_all = c.execute(
+            "SELECT mission_id, body_json, event_hash FROM mission_events ORDER BY sequence ASC"
+        ).fetchall()
+        by_mission: dict[str, list] = {}
+        for e in events_all:
+            mid = e["mission_id"]
+            by_mission.setdefault(mid, []).append(e)
             body = json.loads(e["body_json"])
-            stored = body.get("event_hash") or e["event_hash"]
-            # recompute without mutating store
             from recipe_engine.founder_runtime.contracts.events import MissionEvent
             ev = MissionEvent.from_dict(body)
-            expected = stored
-            recomputed = ev.compute_hash()
-            if expected and expected != recomputed:
+            if not ev.verify_hash():
                 issues.append(f"event_hash_mismatch:{ev.event_id}")
-        # projection hash
-        missions = c.execute("SELECT mission_id, body_json, projection_hash FROM missions").fetchall()
-        for m in missions:
-            body = json.loads(m["body_json"])
-            proj = hash_payload(body)
-            if proj != m["projection_hash"]:
-                issues.append(f"projection_hash_mismatch:{m['mission_id']}")
+
+        missions = c.execute(
+            "SELECT mission_id, body_json, projection_hash, version FROM missions"
+        ).fetchall()
+        for mrow in missions:
+            mid = mrow["mission_id"]
+            stored = Mission.from_dict(json.loads(mrow["body_json"]))
+            # self-hash of stored body vs column
+            body_hash = hash_payload(stored.to_dict())
+            if body_hash != mrow["projection_hash"]:
+                issues.append(f"projection_hash_mismatch:{mid}")
+            # rebuild from events must match stored body
+            ev_rows = by_mission.get(mid) or []
+            if not ev_rows:
+                issues.append(f"no_events:{mid}")
+                continue
+            try:
+                evs = []
+                for er in ev_rows:
+                    from recipe_engine.founder_runtime.contracts.events import MissionEvent
+                    evs.append(MissionEvent.from_dict(json.loads(er["body_json"])))
+                rebuilt = rebuild_mission_from_events(evs)
+                if projection_hash(rebuilt) != body_hash:
+                    issues.append(f"rebuild_divergence:{mid}")
+                if rebuilt.current_state != stored.current_state:
+                    issues.append(f"state_divergence:{mid}")
+                if rebuilt.version != stored.version:
+                    issues.append(f"version_divergence:{mid}")
+            except Exception as ex:
+                issues.append(f"rebuild_error:{mid}:{type(ex).__name__}")
         return {
             "ok": len(issues) == 0,
             "schema_version": self.schema_version(),
             "issues": issues,
             "mission_count": len(missions),
-            "event_count": len(events),
+            "event_count": len(events_all),
         }
 
     def rebuild_projection_from_events(self, mission_id: str) -> Mission:
-        """Replay events to rebuild mission projection (read path for recovery proofs)."""
-        mission = self.get_mission(mission_id)
-        if mission is None:
-            raise MissionNotFound("mission not found", {"mission_id": mission_id})
+        """Rebuild mission projection from the authoritative event stream."""
+        from recipe_engine.founder_runtime.events.projector import rebuild_mission_from_events
         events = self.list_events(mission_id)
-        # projection is already maintained; rebuild state sequence validation
-        state = None
-        for ev in events:
-            if state is None:
-                state = ev.next_state
-            else:
-                state = ev.next_state
-        # return stored projection after validation
-        if events and mission.current_state != events[-1].next_state:
-            raise PersistenceConflict(
-                "projection diverges from events",
-                {
-                    "mission_state": mission.current_state.value,
-                    "last_event_state": events[-1].next_state.value,
-                },
-            )
-        return mission
+        if not events:
+            raise MissionNotFound("no events for mission", {"mission_id": mission_id})
+        return rebuild_mission_from_events(events)

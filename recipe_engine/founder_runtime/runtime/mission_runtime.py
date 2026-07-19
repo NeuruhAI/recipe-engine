@@ -1,31 +1,36 @@
-"""MissionRuntime — durable mission kernel orchestration (fixture adapters only)."""
+"""MissionRuntime — durable mission kernel (P1.1: event-sourced body + approvals)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from recipe_engine.founder_runtime import RUNTIME_VERSION
 from recipe_engine.founder_runtime.clock import Clock, SystemClock
 from recipe_engine.founder_runtime.errors import (
-    MissionNotFound, StateTransitionInvalid, ReceiptMissing, AdapterModeInvalid,
-    MissionSchemaInvalid,
+    MissionNotFound, StateTransitionInvalid, AdapterModeInvalid,
+    MissionSchemaInvalid, ApprovalRequired, AuthorityDenied, ApprovalExpired,
+    PersistenceConflict,
 )
 from recipe_engine.founder_runtime.ids import new_uuid, hash_payload
 from recipe_engine.founder_runtime.persistence.sqlite import SqliteStore
 from recipe_engine.founder_runtime.contracts.mission import Mission, DeliverableStatus
-from recipe_engine.founder_runtime.contracts.events import MissionEvent, EventType, SCHEMA_EVENT
-from recipe_engine.founder_runtime.contracts.approval import Approval, ApprovalDecision, SCHEMA_APPROVAL
+from recipe_engine.founder_runtime.contracts.events import (
+    MissionEvent, EventType, SCHEMA_EVENT, SAME_STATE_EVENT_TYPES,
+)
+from recipe_engine.founder_runtime.contracts.approval import Approval, ApprovalDecision
 from recipe_engine.founder_runtime.contracts.receipts import ExecutionReceipt
-from recipe_engine.founder_runtime.state.states import MissionState
+from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
 from recipe_engine.founder_runtime.state.state_machine import StateMachine
 from recipe_engine.founder_runtime.intent.compiler import compile_intent_to_mission
 from recipe_engine.founder_runtime.events.replay import replay_mission
-from recipe_engine.founder_runtime.runtime.locks import LockManager, WorkerLeaseManager
+from recipe_engine.founder_runtime.runtime.locks import LockManager, WorkerLeaseManager, default_worker_id
 from recipe_engine.founder_runtime.runtime.checkpoints import make_checkpoint
 from recipe_engine.founder_runtime.runtime.recovery import recover_mission
-from recipe_engine.founder_runtime.runtime.completion import verify_completion
-from recipe_engine.founder_runtime.contracts.completion import AcceptanceResult
+from recipe_engine.founder_runtime.runtime.approvals import (
+    is_approval_gated, validate_approval_record, assert_approval_usable, gated_action_for,
+)
 from recipe_engine.founder_runtime.observability.logging import RuntimeLog
 from recipe_engine.founder_runtime.observability.metrics import Metrics
 
@@ -36,6 +41,7 @@ class MissionRuntime:
 
     Adapter mode must be explicit fixture. No live services.
     Model output cannot transition state — only MissionEvent via this runtime.
+    Mission body mutations only via append-only events.
     """
 
     def __init__(
@@ -43,26 +49,24 @@ class MissionRuntime:
         db_path: str | Path,
         *,
         clock: Clock | None = None,
-        worker_id: str = "worker_local",
+        worker_id: str | None = None,
         adapter_mode: str = "fixture",
     ):
         if adapter_mode != "fixture":
             raise AdapterModeInvalid("MissionRuntime P1 requires adapter_mode='fixture'", {"mode": adapter_mode})
         self.adapter_mode = "fixture"
         self.clock = clock or SystemClock()
-        self.worker_id = worker_id
+        self.worker_id = worker_id if worker_id is not None else default_worker_id()
         self.store = SqliteStore(db_path)
         self.store.initialize()
         self.locks = LockManager(self.store, self.clock)
         self.workers = WorkerLeaseManager(self.store, self.clock)
         self.log = RuntimeLog()
         self.metrics = Metrics()
-        self._step_state: dict[str, dict[str, Any]] = {}  # mission_id -> runtime memory (also checkpointed)
+        self._step_state: dict[str, dict[str, Any]] = {}
 
     def close(self) -> None:
         self.store.close()
-
-    # ---- mission lifecycle ----
 
     def create_mission_from_text(
         self,
@@ -76,14 +80,13 @@ class MissionRuntime:
             clock_now=now,
             creation_idempotency_key=creation_idempotency_key,
         )
-        # If already BLOCKED_INPUT from compiler, still persist
         created = self.store.create_mission(mission)
         if created.mission_id != mission.mission_id and creation_idempotency_key:
-            # idempotent return
             self.metrics.inc("mission_create_idempotent")
             return created
-        # append creation event
         if created.version == 0 and not self.store.list_events(created.mission_id):
+            # Anchor full mission body in creation event for rebuild
+            body = created.to_dict()
             ev = self._event(
                 created,
                 prior=None,
@@ -91,9 +94,11 @@ class MissionRuntime:
                 etype=EventType.MISSION_CREATED,
                 reason="mission_created",
                 idem=f"create:{created.creation_idempotency_key or created.mission_id}",
-                payload={"interpretation": interpretation},
+                payload={
+                    "interpretation": interpretation,
+                    "mission_body": body,
+                },
             )
-            # for initial create, version is 0; append bumps to 1
             self.store.append_event(ev, expected_version=0, mission_body=created)
             created = self.store.get_mission(created.mission_id) or created
         self.metrics.inc("missions_created")
@@ -122,9 +127,31 @@ class MissionRuntime:
         idempotency_key: str | None = None,
         payload: dict[str, Any] | None = None,
         evidence_refs: list[str] | None = None,
+        approval_id: str | None = None,
     ) -> Mission:
         mission = self.get_mission(mission_id)
         prior = mission.current_state
+
+        # Approval gate
+        if is_approval_gated(prior, next_state):
+            if not approval_id:
+                raise ApprovalRequired(
+                    "approval-gated transition requires approval_id",
+                    {"prior": prior.value, "next": next_state.value},
+                )
+            action, scope = gated_action_for(prior, next_state)
+            self._consume_approval_for_transition(
+                mission_id=mission_id,
+                approval_id=approval_id,
+                action=action,
+                scope=scope,
+                transition_reason=reason,
+            )
+            # re-load after consumption event
+            mission = self.get_mission(mission_id)
+            prior = mission.current_state
+            evidence_refs = list(evidence_refs or []) + [f"approval:{approval_id}"]
+
         ev = self._event(
             mission,
             prior=prior,
@@ -182,24 +209,235 @@ class MissionRuntime:
         ev.compute_hash()
         return ev
 
+    def set_deliverable_status(
+        self,
+        mission_id: str,
+        deliverable_id: str,
+        status: DeliverableStatus,
+        *,
+        idempotency_key: str | None = None,
+        actor: str = "runtime",
+    ) -> Mission:
+        """Event-sourced deliverable status change — no raw body mutation."""
+        mission = self.get_mission(mission_id)
+        if mission.current_state in TERMINAL_STATES:
+            raise StateTransitionInvalid(
+                "terminal mission cannot change deliverables",
+                {"state": mission.current_state.value},
+            )
+        prior_status = None
+        for d in mission.deliverables:
+            if d.deliverable_id == deliverable_id:
+                prior_status = d.status
+                break
+        if prior_status is None:
+            raise MissionSchemaInvalid(
+                "unknown deliverable_id",
+                {"deliverable_id": deliverable_id, "mission_id": mission_id},
+            )
+        if not isinstance(status, DeliverableStatus):
+            try:
+                status = DeliverableStatus(status)
+            except ValueError as e:
+                raise MissionSchemaInvalid("invalid deliverable status", {"status": str(status)}) from e
+        if prior_status == status:
+            return mission  # no-op, no event
+        idem = idempotency_key or f"deliv:{mission_id}:{deliverable_id}:{prior_status.value}->{status.value}"
+        ev = self._event(
+            mission,
+            prior=mission.current_state,
+            next_state=mission.current_state,
+            etype=EventType.DELIVERABLE_STATUS_CHANGED,
+            reason="deliverable_status_changed",
+            actor=actor,
+            idem=idem,
+            payload={
+                "deliverable_id": deliverable_id,
+                "prior_status": prior_status.value,
+                "next_status": status.value,
+            },
+        )
+        StateMachine.assert_transition(
+            mission.current_state, mission.current_state, event=ev, require_event=True,
+        )
+        self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        return self.get_mission(mission_id)
+
+    def bind_plan_id(self, mission_id: str, plan_id: str, *, idempotency_key: str | None = None) -> Mission:
+        mission = self.get_mission(mission_id)
+        if mission.current_state in TERMINAL_STATES:
+            raise StateTransitionInvalid("terminal mission cannot bind plan", {"state": mission.current_state.value})
+        if mission.plan_id == plan_id:
+            return mission
+        idem = idempotency_key or f"plan_bound:{mission_id}:{plan_id}"
+        ev = self._event(
+            mission,
+            prior=mission.current_state,
+            next_state=mission.current_state,
+            etype=EventType.PLAN_BOUND,
+            reason="plan_bound",
+            idem=idem,
+            payload={"plan_id": plan_id},
+        )
+        StateMachine.assert_transition(mission.current_state, mission.current_state, event=ev, require_event=True)
+        self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        return self.get_mission(mission_id)
+
     def record_approval(self, approval: Approval) -> Approval:
+        now = self.clock.now_iso()
+        validate_approval_record(approval, now_iso=now)
         if not approval.approval_hash:
             approval.compute_hash()
-        saved = self.store.save_approval(approval)
+        if not approval.created_at:
+            approval.created_at = now
         mission = self.get_mission(approval.mission_id)
-        # event without state change — stay same state
+        saved = self.store.save_approval(approval)
+        # Append APPROVAL_RECORDED to event log (same-state audit event)
+        idem = f"approval:{approval.idempotency_key or approval.approval_id}"
         ev = self._event(
             mission,
             prior=mission.current_state,
             next_state=mission.current_state,
             etype=EventType.APPROVAL_RECORDED,
             reason="approval_recorded",
-            idem=f"approval:{approval.idempotency_key or approval.approval_id}",
-            payload={"approval_id": approval.approval_id, "decision": approval.decision.value},
+            idem=idem,
+            payload={
+                "approval_id": approval.approval_id,
+                "decision": approval.decision.value,
+                "action": approval.exact_requested_action,
+                "scope": approval.scope,
+                "expiry": approval.expiry,
+            },
         )
-        # same-state transition not in table — so only store approval without state event
-        # Spec: every state change requires event. Non-state records are separate.
+        StateMachine.assert_transition(mission.current_state, mission.current_state, event=ev, require_event=True)
+        # Use current version; if duplicate approval idempotency, save_approval returned existing
+        # Event may also be duplicate
+        try:
+            self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        except PersistenceConflict:
+            # if version raced, reload and try once with idempotent key
+            mission = self.get_mission(approval.mission_id)
+            self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
         return saved
+
+    def _consume_approval_for_transition(
+        self,
+        *,
+        mission_id: str,
+        approval_id: str,
+        action: str,
+        scope: str,
+        transition_reason: str,
+    ) -> Approval:
+        mission = self.get_mission(mission_id)
+        approval = self.store.get_approval(approval_id)
+        if approval is None:
+            raise ApprovalRequired("approval not found", {"approval_id": approval_id})
+        now = self.clock.now_iso()
+        assert_approval_usable(
+            approval,
+            mission_id=mission_id,
+            action=action,
+            scope=scope,
+            now_iso=now,
+        )
+        # Mark consumed on approval record
+        approval.decision = ApprovalDecision.CONSUMED
+        approval.consumed_by = f"transition:{transition_reason}"
+        approval.decided_at = now
+        approval.compute_hash()
+        # Update approvals table by re-saving with same id — need update path
+        # save_approval is insert-or-idempotent; force update via SQL
+        c = self.store._c()
+        from recipe_engine.founder_runtime.serialization import to_canonical
+        c.execute(
+            "UPDATE approvals SET body_json=?, approval_hash=?, decision=? WHERE approval_id=?",
+            (to_canonical(approval.to_dict()), approval.approval_hash, approval.decision.value, approval.approval_id),
+        )
+        # Append APPROVAL_CONSUMED event
+        idem = f"approval_consumed:{approval_id}:{action}"
+        ev = self._event(
+            mission,
+            prior=mission.current_state,
+            next_state=mission.current_state,
+            etype=EventType.APPROVAL_CONSUMED,
+            reason="approval_consumed",
+            idem=idem,
+            payload={
+                "approval_id": approval_id,
+                "action": action,
+                "scope": scope,
+                "consumed_by": approval.consumed_by,
+            },
+            evidence_refs=[f"approval:{approval_id}"],
+        )
+        StateMachine.assert_transition(mission.current_state, mission.current_state, event=ev, require_event=True)
+        self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        return approval
+
+    def record_plan_compile_failure(
+        self,
+        mission_id: str,
+        *,
+        detail: str,
+        error_class: str = "plan_compile_failed",
+        final: bool = True,
+    ) -> Mission:
+        """Fail-closed path for plan compilation failure — never COMPLETED."""
+        mission = self.get_mission(mission_id)
+        # Bound detail — no secrets
+        bounded = (detail or "unknown")[:500]
+        target = MissionState.FAILED_FINAL if final else MissionState.FAILED_RETRYABLE
+        # Path to failure from EXECUTING/VERIFYING/PLANNING
+        # Move step by step if needed using allowed edges
+        state = mission.current_state
+        if state == MissionState.EXECUTING:
+            # EXECUTING -> FAILED_FINAL is allowed
+            pass
+        elif state == MissionState.PLANNING:
+            # PLANNING cannot go directly to FAILED_FINAL — use CANCELLED or path via QUEUED?
+            # transitions: PLANNING -> AWAITING_DECISION, AWAITING_APPROVAL, QUEUED, BLOCKED_*, CANCELLED, PAUSED
+            # From QUEUED -> EXECUTING -> FAILED_FINAL
+            # Or CANCELLED from PLANNING
+            # Prefer FAILED_RETRYABLE from EXECUTING. From PLANNING use CANCELLED? Spec says FAILED preferably.
+            # Looking at table: FAILED_FINAL only from EXECUTING, VERIFYING, RECONCILING, RECOVERING, FAILED_RETRYABLE
+            # So from PLANNING we need to go QUEUED -> EXECUTING -> FAILED_FINAL or use CANCELLED
+            # Better: PLANNING -> QUEUED -> EXECUTING -> FAILED_FINAL with events
+            if state == MissionState.PLANNING:
+                self.transition(mission_id, MissionState.QUEUED, reason="queue_for_failure_path")
+                self.transition(mission_id, MissionState.EXECUTING, reason="enter_exec_for_failure")
+                mission = self.get_mission(mission_id)
+                state = mission.current_state
+        elif state == MissionState.VERIFYING:
+            pass  # VERIFYING -> FAILED_FINAL allowed
+        elif state not in (
+            MissionState.EXECUTING, MissionState.FAILED_RETRYABLE, MissionState.RECOVERING,
+            MissionState.RECONCILING, MissionState.VERIFYING,
+        ):
+            # try reach EXECUTING
+            if state == MissionState.QUEUED:
+                self.transition(mission_id, MissionState.EXECUTING, reason="enter_exec_for_failure")
+                mission = self.get_mission(mission_id)
+
+        mission = self.get_mission(mission_id)
+        payload = {
+            "error_class": error_class,
+            "detail": bounded,
+        }
+        # Prefer PLAN_COMPILE_FAILED then state to FAILED_FINAL
+        ev = self._event(
+            mission,
+            prior=mission.current_state,
+            next_state=target,
+            etype=EventType.PLAN_COMPILE_FAILED,
+            reason="plan_compile_failed",
+            idem=f"plan_fail:{mission_id}:{error_class}:{hash_payload(payload)[:12]}",
+            payload=payload,
+        )
+        StateMachine.assert_transition(mission.current_state, target, event=ev, require_event=True)
+        self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        self.metrics.inc("plan_compile_failures")
+        return self.get_mission(mission_id)
 
     def record_receipt(self, receipt: ExecutionReceipt) -> ExecutionReceipt:
         return self.store.save_receipt(receipt)
@@ -258,28 +496,3 @@ class MissionRuntime:
 
     def save_completion(self, report) -> Any:
         return self.store.save_completion(report)
-
-    def set_deliverable_status(self, mission_id: str, deliverable_id: str, status: DeliverableStatus) -> Mission:
-        mission = self.get_mission(mission_id)
-        new_dels = []
-        for d in mission.deliverables:
-            if d.deliverable_id == deliverable_id:
-                from dataclasses import replace
-                new_dels.append(replace(d, status=status))
-            else:
-                new_dels.append(d)
-        mission.deliverables = new_dels
-        # persist via no-op version bump event? better update body through a synthetic same-state is invalid
-        # Use a checkpoint + direct projection update via transition payload and body merge in append
-        # Simpler: store mission body by appending a non-transition event is hard with current schema.
-        # We update mission by re-reading after a RECONCILING transition with payload that includes deliverables.
-        # For P1: allow internal method to write mission body with version CAS.
-        c = self.store._c()
-        body = mission.to_dict()
-        from recipe_engine.founder_runtime.serialization import to_canonical
-        from recipe_engine.founder_runtime.ids import hash_payload
-        c.execute(
-            "UPDATE missions SET body_json=?, projection_hash=? WHERE mission_id=? AND version=?",
-            (to_canonical(body), hash_payload(body), mission_id, mission.version),
-        )
-        return mission
