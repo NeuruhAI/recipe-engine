@@ -1,0 +1,44 @@
+"""Canonical mission states — exact set required by P1."""
+
+from __future__ import annotations
+
+from enum import Enum
+
+
+class MissionState(str, Enum):
+    DRAFT = "DRAFT"
+    INTAKE = "INTAKE"
+    CONTEXT_RESOLUTION = "CONTEXT_RESOLUTION"
+    PLANNING = "PLANNING"
+    AWAITING_DECISION = "AWAITING_DECISION"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    QUEUED = "QUEUED"
+    EXECUTING = "EXECUTING"
+    VERIFYING = "VERIFYING"
+    RECONCILING = "RECONCILING"
+    COMPLETED = "COMPLETED"
+    COMPLETED_WITH_EXCEPTIONS = "COMPLETED_WITH_EXCEPTIONS"
+    BLOCKED_INPUT = "BLOCKED_INPUT"
+    BLOCKED_DEPENDENCY = "BLOCKED_DEPENDENCY"
+    BLOCKED_POLICY = "BLOCKED_POLICY"
+    PAUSED = "PAUSED"
+    RECOVERING = "RECOVERING"
+    FAILED_RETRYABLE = "FAILED_RETRYABLE"
+    FAILED_FINAL = "FAILED_FINAL"
+    CANCELLED = "CANCELLED"
+    SUPERSEDED = "SUPERSEDED"
+
+
+TERMINAL_STATES: frozenset[MissionState] = frozenset({
+    MissionState.COMPLETED,
+    MissionState.COMPLETED_WITH_EXCEPTIONS,
+    MissionState.FAILED_FINAL,
+    MissionState.CANCELLED,
+    MissionState.SUPERSEDED,
+})
+
+NONTERMINAL_STATES: frozenset[MissionState] = frozenset(
+    s for s in MissionState if s not in TERMINAL_STATES
+)
+
+ALL_STATES: tuple[MissionState, ...] = tuple(MissionState)

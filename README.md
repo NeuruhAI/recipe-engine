@@ -66,3 +66,20 @@ Cross-domain deterministic scenario collapse lives in `recipe_engine/autonomy/`
 - Tests: `python3 -m unittest discover -s tests -v`
 
 **Not live-integrated.** No autonomous execution claims.
+
+
+## Founder Runtime P1 (candidate)
+
+Persistent mission kernel + recovery + read-only system-status vertical slice.
+
+- Package: `recipe_engine.founder_runtime`
+- Fixture adapters only — no live services
+- Local SQLite mission store (temp/dev path)
+- Stacked on autonomy-core P0
+
+```bash
+python -m unittest discover -s tests -v
+python -m recipe_engine.founder_runtime.cli run --fixture
+```
+
+See `docs/FOUNDER_RUNTIME_ARCHITECTURE.md`.

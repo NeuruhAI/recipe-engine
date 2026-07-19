@@ -7,3 +7,11 @@ data/cache/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Founder Runtime P1 local data
+founder_runtime_data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.mypy_cache/
+.ruff_cache/
