@@ -54,3 +54,15 @@ python3 run.py --no-engine   # scrape + persist only
 
 Exit codes: 0 ok · 1 config/env · 2 zero events (parse failure) ·
 3 node fork · 4 engine call failures (run completed, see manifest).
+
+## Autonomy core (candidate)
+
+Cross-domain deterministic scenario collapse lives in `recipe_engine/autonomy/`
+(operator re-charter, branch `feat/autonomy-core-p0`).
+
+- Pure library: no DB/network/env in the autonomy package
+- Estate-sale pipeline above is preserved and unchanged
+- Docs: `docs/RECIPE_ENGINE_CHARTER.md`
+- Tests: `python3 -m unittest discover -s tests -v`
+
+**Not live-integrated.** No autonomous execution claims.
