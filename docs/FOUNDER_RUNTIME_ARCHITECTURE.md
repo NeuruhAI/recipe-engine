@@ -34,3 +34,6 @@ It compiles founder intent into durable missions, plans via P0 autonomy core, re
 - No live AXON/IAR/Governance/Mother/Vault/Qdrant calls
 - No production DB, no ports, no deploys
 - No second organism
+
+## P2-A
+Adapter foundation landed on branch feat/founder-runtime-p2a-adapter-foundation. Fixture-only runtime path unchanged. Live adapters deferred to P2-B.

@@ -34,6 +34,22 @@ class ErrorCode(str, Enum):
     LOCK_HELD = "LOCK_HELD"
     MISSION_NOT_FOUND = "MISSION_NOT_FOUND"
     UNRECOVERABLE = "UNRECOVERABLE"
+    # P2-A adapter foundation codes
+    ADAPTER_DISABLED = "ADAPTER_DISABLED"
+    ADAPTER_UNAVAILABLE = "ADAPTER_UNAVAILABLE"
+    CONFIGURATION_MISSING = "CONFIGURATION_MISSING"
+    IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
+    VERSION_MISMATCH = "VERSION_MISMATCH"
+    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
+    AUTHORIZATION_DENIED = "AUTHORIZATION_DENIED"
+    TIMEOUT = "TIMEOUT"
+    MALFORMED_RESPONSE = "MALFORMED_RESPONSE"
+    PROVENANCE_INVALID = "PROVENANCE_INVALID"
+    UNSAFE_CAPABILITY = "UNSAFE_CAPABILITY"
+    MUTATION_NOT_AUTHORIZED = "MUTATION_NOT_AUTHORIZED"
+    LIVE_FALLBACK_FORBIDDEN = "LIVE_FALLBACK_FORBIDDEN"
+    DEPENDENCY_UNAVAILABLE = "DEPENDENCY_UNAVAILABLE"
+    INTERNAL_ADAPTER_FAILURE = "INTERNAL_ADAPTER_FAILURE"
 
 
 class FounderRuntimeError(Exception):
@@ -140,3 +156,65 @@ class ContextConflict(FounderRuntimeError):
 class MissionNotFound(FounderRuntimeError):
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(ErrorCode.MISSION_NOT_FOUND, message, details)
+
+
+# ---- P2-A adapter errors ----
+
+class AdapterDisabled(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.ADAPTER_DISABLED, message, details)
+
+
+class AdapterUnavailable(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.ADAPTER_UNAVAILABLE, message, details)
+
+
+class ConfigurationMissing(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.CONFIGURATION_MISSING, message, details)
+
+
+class IdentityMismatch(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.IDENTITY_MISMATCH, message, details)
+
+
+class VersionMismatch(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.VERSION_MISMATCH, message, details)
+
+
+class ProvenanceInvalid(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.PROVENANCE_INVALID, message, details)
+
+
+class MutationNotAuthorized(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.MUTATION_NOT_AUTHORIZED, message, details)
+
+
+class LiveFallbackForbidden(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.LIVE_FALLBACK_FORBIDDEN, message, details)
+
+
+class UnsafeCapability(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.UNSAFE_CAPABILITY, message, details)
+
+
+class TimeoutError_(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.TIMEOUT, message, details)
+
+
+class MalformedResponse(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.MALFORMED_RESPONSE, message, details)
+
+
+class InternalAdapterFailure(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.INTERNAL_ADAPTER_FAILURE, message, details)

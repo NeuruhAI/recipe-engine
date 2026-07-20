@@ -8,11 +8,32 @@ from recipe_engine.founder_runtime.contracts.receipts import (
     ExecutionReceipt, ReceiptStatus, TestResult, ArtifactRef, SCHEMA_RECEIPT,
 )
 from recipe_engine.founder_runtime.ids import hash_payload, stable_id
-from .base import BaseFixtureAdapter
+from recipe_engine.founder_runtime.adapters.base import BaseFixtureAdapter, AdapterMode, MutationClass
+from recipe_engine.founder_runtime.adapters.identity import fixture_identity, fixture_dependency
+from recipe_engine.founder_runtime.adapters.fixture_mixin import envelope_for_fixture
+from recipe_engine.founder_runtime.adapters.protocols import AdapterRequestMeta, RetryPolicyDeclaration
+from recipe_engine.founder_runtime.adapters.envelope import AdapterResult
 
 
 class FixtureAxon(BaseFixtureAdapter):
     name = "axon"
+    adapter_version = "p2a.fixture.axon.1"
+
+    def mode(self) -> AdapterMode:
+        return AdapterMode.FIXTURE
+
+    def mutation_class(self) -> MutationClass:
+        return MutationClass.READ_ONLY
+
+    def retry_policy(self) -> RetryPolicyDeclaration:
+        return RetryPolicyDeclaration(max_attempts=1)
+
+    def adapter_identity(self):
+        return fixture_identity(self.name, capabilities=("execute_readonly_step",), version=self.adapter_version)
+
+    def dependency_identity(self):
+        return fixture_dependency("axon", endpoint_class="fixture_readonly")
+
 
     def execute_readonly_step(
         self,
@@ -76,3 +97,26 @@ class FixtureAxon(BaseFixtureAdapter):
         )
         receipt.compute_hash()
         return receipt
+
+    def execute_readonly_result(self, **kwargs: Any) -> AdapterResult:
+        meta = kwargs.pop("meta", None)
+        if meta is None:
+            meta = AdapterRequestMeta(
+                correlation_id=str(kwargs.get("mission_id") or "fixture_axon"),
+                mission_id=kwargs.get("mission_id"),
+                plan_id=kwargs.get("plan_id"),
+                step_id=kwargs.get("step_id"),
+                observed_at=kwargs.get("started_at") or "1970-01-01T00:00:00.000Z",
+            )
+        receipt = self.execute_readonly_step(**kwargs)
+        return envelope_for_fixture(
+            adapter_name=self.name,
+            adapter_version=self.adapter_version,
+            operation="execute_readonly_step",
+            meta=meta,
+            payload=receipt.to_dict(),
+            source_identity=self.adapter_identity().to_dict(),
+            dependency_identity=self.dependency_identity().to_dict(),
+            evidence_refs=[receipt.receipt_id],
+            logical_source="fixture://axon/readonly",
+        )
