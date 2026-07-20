@@ -63,4 +63,5 @@ def envelope_for_fixture(
         error_code=error_code,
         retryable=False,
         fallback_used=False,
+        declared_timeout_ms=meta.timeout_ms,
     )

@@ -49,11 +49,9 @@ class AdapterConfig:
     def require_binding(self, adapter_type: str) -> AdapterBinding:
         b = self.binding_for(adapter_type)
         if b is None:
-            # fall back to default fixture binding for known types
-            return AdapterBinding(
-                adapter_type=adapter_type,
-                mode=self.default_mode,
-                implementation="fixture" if self.default_mode == AdapterMode.FIXTURE else self.default_mode.value,
+            raise ConfigurationMissing(
+                "adapter binding is required; implicit fixture fallback is forbidden",
+                {"adapter_type": adapter_type},
             )
         return b
 
@@ -71,6 +69,7 @@ def fixture_only_config(adapter_types: tuple[str, ...] | None = None) -> Adapter
     types = adapter_types or (
         "mother", "github", "vault", "qdrant", "iar", "aegis",
         "governance", "axon_readonly", "axon_mutation", "persistence", "clock",
+        "cockpit",
     )
     bindings = tuple(
         AdapterBinding(adapter_type=t, mode=AdapterMode.FIXTURE, implementation="fixture")

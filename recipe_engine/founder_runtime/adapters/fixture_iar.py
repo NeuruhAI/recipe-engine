@@ -26,10 +26,44 @@ class FixtureIAR(BaseFixtureAdapter):
         return RetryPolicyDeclaration(max_attempts=1)
 
     def adapter_identity(self):
-        return fixture_identity(self.name, capabilities=("interpret",), version=self.adapter_version)
+        return fixture_identity(
+            self.name,
+            capabilities=("health", "verify_provenance", "interpret_fixture"),
+            version=self.adapter_version,
+        )
 
     def dependency_identity(self):
         return fixture_dependency("iar", endpoint_class="fixture_inference")
+
+    def health(self, meta: AdapterRequestMeta) -> AdapterResult:
+        return envelope_for_fixture(
+            adapter_name=self.name,
+            adapter_version=self.adapter_version,
+            operation="health",
+            meta=meta,
+            payload={
+                "enabled": True,
+                "active_backend": "fixture",
+                "active_model": "fixture",
+                "backends": {"fixture": True},
+                "degraded_reason": None,
+            },
+            source_identity=self.adapter_identity().to_dict(),
+            dependency_identity=self.dependency_identity().to_dict(),
+            logical_source="fixture://iar/health",
+        )
+
+    def verify_provenance(self, meta: AdapterRequestMeta) -> AdapterResult:
+        return envelope_for_fixture(
+            adapter_name=self.name,
+            adapter_version=self.adapter_version,
+            operation="verify_provenance",
+            meta=meta,
+            payload={"provenance_intact": True},
+            source_identity=self.adapter_identity().to_dict(),
+            dependency_identity=self.dependency_identity().to_dict(),
+            logical_source="fixture://iar/provenance",
+        )
 
     def interpret(
         self,

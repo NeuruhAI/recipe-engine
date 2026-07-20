@@ -50,6 +50,10 @@ class ErrorCode(str, Enum):
     LIVE_FALLBACK_FORBIDDEN = "LIVE_FALLBACK_FORBIDDEN"
     DEPENDENCY_UNAVAILABLE = "DEPENDENCY_UNAVAILABLE"
     INTERNAL_ADAPTER_FAILURE = "INTERNAL_ADAPTER_FAILURE"
+    QDRANT_COUNT_MISMATCH = "QDRANT_COUNT_MISMATCH"
+    QDRANT_COUNT_CHANGED = "QDRANT_COUNT_CHANGED"
+    QDRANT_COLLECTION_MISMATCH = "QDRANT_COLLECTION_MISMATCH"
+    QDRANT_PAYLOAD_PROVENANCE_MISMATCH = "QDRANT_PAYLOAD_PROVENANCE_MISMATCH"
 
 
 class FounderRuntimeError(Exception):
@@ -218,3 +222,23 @@ class MalformedResponse(FounderRuntimeError):
 class InternalAdapterFailure(FounderRuntimeError):
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(ErrorCode.INTERNAL_ADAPTER_FAILURE, message, details)
+
+
+class QdrantCountMismatch(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.QDRANT_COUNT_MISMATCH, message, details)
+
+
+class QdrantCountChanged(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.QDRANT_COUNT_CHANGED, message, details)
+
+
+class QdrantCollectionMismatch(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.QDRANT_COLLECTION_MISMATCH, message, details)
+
+
+class QdrantPayloadProvenanceMismatch(FounderRuntimeError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.QDRANT_PAYLOAD_PROVENANCE_MISMATCH, message, details)

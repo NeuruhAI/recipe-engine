@@ -106,6 +106,7 @@ class ModeStubAdapter:
             plan_id=meta.plan_id,
             step_id=meta.step_id,
             mutation_attempted=False,
+            declared_timeout_ms=meta.timeout_ms,
         )
 
     def call(self, operation: str, meta: AdapterRequestMeta) -> AdapterResult:

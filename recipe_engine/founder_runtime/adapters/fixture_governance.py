@@ -27,10 +27,42 @@ class FixtureGovernance(BaseFixtureAdapter):
         return RetryPolicyDeclaration(max_attempts=1)
 
     def adapter_identity(self):
-        return fixture_identity(self.name, capabilities=("decide",), version=self.adapter_version)
+        return fixture_identity(
+            self.name,
+            capabilities=("health", "default_policy", "fixture_decide"),
+            version=self.adapter_version,
+        )
 
     def dependency_identity(self):
         return fixture_dependency("governance", endpoint_class="fixture_policy")
+
+    def health(self, meta: AdapterRequestMeta) -> AdapterResult:
+        return envelope_for_fixture(
+            adapter_name=self.name,
+            adapter_version=self.adapter_version,
+            operation="health",
+            meta=meta,
+            payload={"ok": True, "service": "fixture_governance"},
+            source_identity=self.adapter_identity().to_dict(),
+            dependency_identity=self.dependency_identity().to_dict(),
+            logical_source="fixture://governance/health",
+        )
+
+    def default_policy(self, meta: AdapterRequestMeta) -> AdapterResult:
+        return envelope_for_fixture(
+            adapter_name=self.name,
+            adapter_version=self.adapter_version,
+            operation="default_policy",
+            meta=meta,
+            payload={
+                "policy_version": "fixture",
+                "authority_classes": {key.value: value for key, value in FIXTURE_POLICY.items()},
+                "evidence_class": "fixture",
+            },
+            source_identity=self.adapter_identity().to_dict(),
+            dependency_identity=self.dependency_identity().to_dict(),
+            logical_source="fixture://governance/default-policy",
+        )
 
     def decide(
         self,

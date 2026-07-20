@@ -73,6 +73,28 @@ class AdapterRegistry:
             )
         bucket[implementation] = factory
 
+    @staticmethod
+    def _require_resolved_mode(instance: Any, expected: AdapterMode, adapter_type: str) -> Any:
+        try:
+            actual = instance.mode()
+            identity_mode = instance.adapter_identity().mode
+        except Exception as exc:
+            raise LiveFallbackForbidden(
+                "resolved adapter lacks verifiable mode identity",
+                {"adapter_type": adapter_type, "expected_mode": expected.value},
+            ) from exc
+        if actual != expected or identity_mode != expected:
+            raise LiveFallbackForbidden(
+                "resolved adapter identity does not match configured mode",
+                {
+                    "adapter_type": adapter_type,
+                    "expected_mode": expected.value,
+                    "actual_mode": getattr(actual, "value", str(actual)),
+                    "identity_mode": getattr(identity_mode, "value", str(identity_mode)),
+                },
+            )
+        return instance
+
     def resolve(self, adapter_type: str, *, mode: str | AdapterMode | None = None) -> Any:
         if adapter_type not in ADAPTER_TYPES:
             raise AdapterModeInvalid(
@@ -86,12 +108,23 @@ class AdapterRegistry:
         if adapter_type == "axon_mutation":
             return AxonMutationHardStop(mode=effective_mode)
 
+        if effective_mode == AdapterMode.LIVE and not self.config.allow_live:
+            raise ConfigurationMissing(
+                "live mode not authorized in P2-A config",
+                {"adapter_type": adapter_type},
+            )
+
+        if mode is not None and effective_mode != binding.mode:
+            raise LiveFallbackForbidden(
+                "caller mode cannot override the configured adapter identity",
+                {
+                    "adapter_type": adapter_type,
+                    "configured_mode": binding.mode.value,
+                    "requested_mode": effective_mode.value,
+                },
+            )
+
         if effective_mode == AdapterMode.LIVE:
-            if not self.config.allow_live:
-                raise ConfigurationMissing(
-                    "live mode not authorized in P2-A config",
-                    {"adapter_type": adapter_type},
-                )
             # No live implementations registered in P2-A
             impls = self._factories.get(adapter_type, {})
             if "live" not in impls:
@@ -100,7 +133,7 @@ class AdapterRegistry:
                     {"adapter_type": adapter_type, "mode": "live"},
                 )
             # Would construct live — still no fallback
-            return impls["live"]()
+            return self._require_resolved_mode(impls["live"](), AdapterMode.LIVE, adapter_type)
 
         if effective_mode == AdapterMode.DISABLED:
             return ModeStubAdapter(adapter_type, AdapterMode.DISABLED, reason="policy_disabled")
@@ -117,7 +150,10 @@ class AdapterRegistry:
                     "fixture implementation missing; no fallback",
                     {"adapter_type": adapter_type, "implementation": key},
                 )
-            return impls[key]()
+            instance = impls[key]()
+            if adapter_type == "clock":
+                return instance
+            return self._require_resolved_mode(instance, AdapterMode.FIXTURE, adapter_type)
 
         raise AdapterModeInvalid("unhandled adapter mode", {"mode": effective_mode.value})
 

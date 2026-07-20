@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Mapping
 
 from recipe_engine.founder_runtime.errors import AdapterModeInvalid, LiveFallbackForbidden
 
@@ -63,6 +64,53 @@ class MutationClass(str, Enum):
     LOCAL_REVERSIBLE = "local_reversible"
     MUTATING = "mutating"
     DESTRUCTIVE = "destructive"
+
+
+class WriteClass(str, Enum):
+    """Canonical P2-A.1 classification for writes observed at an adapter boundary."""
+
+    MISSION_TRUTH = "mission_truth"
+    OPERATIONAL_METADATA = "operational_metadata"
+    EXTERNAL_MUTATION = "external_mutation"
+    PROHIBITED = "prohibited"
+
+
+@dataclass(frozen=True)
+class OperationalWriteRef:
+    """Bounded upstream write recorded as evidence, never as a trust root."""
+
+    kind: str
+    location_class: str
+    bounded: bool = True
+    recorded_as: str = "evidence_reference"
+
+    def __post_init__(self) -> None:
+        if not self.kind or not self.location_class:
+            raise ValueError("operational write references require kind and location_class")
+        if self.bounded is not True:
+            raise ValueError("operational write references must be bounded")
+        if self.recorded_as != "evidence_reference":
+            raise ValueError("operational writes may only be recorded as evidence_reference")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "location_class": self.location_class,
+            "bounded": True,
+            "recorded_as": "evidence_reference",
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "OperationalWriteRef":
+        required = {"kind", "location_class", "bounded", "recorded_as"}
+        if set(value) != required:
+            raise ValueError("operational write reference has an invalid shape")
+        return cls(
+            kind=str(value["kind"]),
+            location_class=str(value["location_class"]),
+            bounded=value["bounded"] is True,
+            recorded_as=str(value["recorded_as"]),
+        )
 
 
 class BaseFixtureAdapter:

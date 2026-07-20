@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Mapping
 
 from recipe_engine.founder_runtime.adapters.base import AdapterMode, MutationClass
 from recipe_engine.founder_runtime.errors import (
-    IdentityMismatch, VersionMismatch, ProvenanceInvalid,
+    ConfigurationMissing, IdentityMismatch, VersionMismatch, ProvenanceInvalid,
 )
 from recipe_engine.founder_runtime.ids import hash_payload
 
@@ -25,6 +25,7 @@ VAULT_RUNTIME_CHECKOUT = "~/neuruh-vault"
 class DivergenceState(str, Enum):
     MATCHED = "matched"
     DIVERGED = "diverged"
+    DIVERGED_RUNTIME_AHEAD_DIRTY = "diverged_runtime_ahead_dirty"
     UNKNOWN = "unknown"
     NOT_APPLICABLE = "not_applicable"
 
@@ -114,6 +115,12 @@ class Provenance:
     retrieval_timestamp: str
     allowlist_policy_version: str
     evidence_class: EvidenceClass
+    source_dirty: bool | None = None
+    runtime_dirty_count: int | None = None
+    ahead: int | None = None
+    behind: int | None = None
+    ancestry: str | None = None
+    manifest_allowlist_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,19 +132,96 @@ class Provenance:
             "retrieval_timestamp": self.retrieval_timestamp,
             "allowlist_policy_version": self.allowlist_policy_version,
             "evidence_class": self.evidence_class.value,
+            "source_dirty": self.source_dirty,
+            "runtime_dirty_count": self.runtime_dirty_count,
+            "ahead": self.ahead,
+            "behind": self.behind,
+            "ancestry": self.ancestry,
+            "manifest_allowlist_version": self.manifest_allowlist_version,
         }
 
     def assert_for_sync_claim(self) -> None:
         """Fail closed when provenance cannot support a synchronization claim."""
-        if self.divergence_state == DivergenceState.DIVERGED:
+        if self.divergence_state != DivergenceState.MATCHED:
             raise ProvenanceInvalid(
-                "source/runtime divergence blocks synchronization claim",
+                "only positively matched source/runtime provenance supports a synchronization claim",
                 self.to_dict(),
             )
-        if self.evidence_class == EvidenceClass.FIXTURE and self.divergence_state not in (
-            DivergenceState.NOT_APPLICABLE, DivergenceState.MATCHED, DivergenceState.UNKNOWN,
-        ):
-            raise ProvenanceInvalid("invalid fixture provenance state", self.to_dict())
+
+
+VAULT_ROOT_ALIASES = (
+    "NEURUH_VAULT_ROOT",
+    "NEURUH_VAULT",
+    "VAULT_ROOT",
+    "NEURUH_VAULT_PATH",
+)
+REJECTED_VAULT_CLONE_SHA_PREFIXES = ("d970ceb", "c2f84a")
+
+
+@dataclass(frozen=True)
+class VaultDualRootConfig:
+    """Normalized doctrine roots; source is authority, runtime is substrate."""
+
+    source_root: str
+    runtime_root: str
+    selected_aliases: tuple[str, ...]
+    selected_role: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_root": self.source_root,
+            "runtime_root": self.runtime_root,
+            "selected_aliases": list(self.selected_aliases),
+            "selected_role": self.selected_role,
+            "source_is_canonical": True,
+            "runtime_is_deployed_substrate": True,
+        }
+
+
+def normalize_vault_dual_roots(
+    values: Mapping[str, str],
+    *,
+    source_sha: str | None = None,
+    runtime_sha: str | None = None,
+) -> VaultDualRootConfig:
+    """Normalize legacy aliases without reading process environment state."""
+    supplied = {
+        key: str(values[key]).rstrip("/")
+        for key in VAULT_ROOT_ALIASES
+        if key in values and str(values[key]).strip()
+    }
+    if not supplied:
+        raise ConfigurationMissing(
+            "Vault dual-root configuration is unavailable",
+            {"accepted_aliases": list(VAULT_ROOT_ALIASES)},
+        )
+    unique = set(supplied.values())
+    if len(unique) != 1:
+        raise ProvenanceInvalid(
+            "conflicting Vault root aliases",
+            {"aliases": sorted(supplied)},
+        )
+    selected = next(iter(unique))
+    if any(token in selected for token in REJECTED_VAULT_CLONE_SHA_PREFIXES):
+        raise ProvenanceInvalid("rejected historical clone root", {})
+    for observed_sha in (source_sha, runtime_sha):
+        if observed_sha and any(observed_sha.startswith(token) for token in REJECTED_VAULT_CLONE_SHA_PREFIXES):
+            raise ProvenanceInvalid("rejected historical clone identity", {})
+    if selected == VAULT_SOURCE_REPO:
+        role = "source"
+    elif selected == VAULT_RUNTIME_CHECKOUT:
+        role = "runtime"
+    else:
+        raise ProvenanceInvalid(
+            "Vault root is not one of the canonical dual roots",
+            {"selected_role": "unknown"},
+        )
+    return VaultDualRootConfig(
+        source_root=VAULT_SOURCE_REPO,
+        runtime_root=VAULT_RUNTIME_CHECKOUT,
+        selected_aliases=tuple(sorted(supplied)),
+        selected_role=role,
+    )
 
 
 def vault_provenance(
@@ -147,6 +231,12 @@ def vault_provenance(
     retrieval_timestamp: str,
     policy_version: str = "p2a.vault.v1",
     evidence_class: EvidenceClass = EvidenceClass.FIXTURE,
+    source_dirty: bool | None = None,
+    runtime_dirty_count: int | None = None,
+    ahead: int | None = None,
+    behind: int | None = None,
+    ancestry: str | None = None,
+    manifest_allowlist_version: str | None = None,
 ) -> Provenance:
     """Build Vault provenance using canonical source vs runtime checkout paths."""
     if source_sha == runtime_sha and source_sha not in ("", "unknown"):
@@ -154,7 +244,10 @@ def vault_provenance(
     elif source_sha in ("fixture",) or runtime_sha in ("fixture",):
         div = DivergenceState.NOT_APPLICABLE
     elif source_sha and runtime_sha and source_sha != runtime_sha:
-        div = DivergenceState.DIVERGED
+        if (ahead or 0) > 0 and (runtime_dirty_count or 0) > 0:
+            div = DivergenceState.DIVERGED_RUNTIME_AHEAD_DIRTY
+        else:
+            div = DivergenceState.DIVERGED
     else:
         div = DivergenceState.UNKNOWN
     return Provenance(
@@ -166,6 +259,12 @@ def vault_provenance(
         retrieval_timestamp=retrieval_timestamp,
         allowlist_policy_version=policy_version,
         evidence_class=evidence_class,
+        source_dirty=source_dirty,
+        runtime_dirty_count=runtime_dirty_count,
+        ahead=ahead,
+        behind=behind,
+        ancestry=ancestry,
+        manifest_allowlist_version=manifest_allowlist_version,
     )
 
 

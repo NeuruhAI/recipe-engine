@@ -119,4 +119,5 @@ def deny_mutation_result(*, observed_at: str, correlation_id: str, meta: Adapter
         retryable=False,
         causation_id=meta.causation_id if meta else None,
         mission_id=meta.mission_id if meta else None,
+        declared_timeout_ms=meta.timeout_ms if meta else None,
     )
