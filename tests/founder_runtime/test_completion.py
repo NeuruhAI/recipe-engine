@@ -17,6 +17,8 @@ from recipe_engine.founder_runtime.contracts.mission import (
 from recipe_engine.founder_runtime.contracts.completion import AcceptanceResult
 from recipe_engine.founder_runtime.contracts.receipts import ExecutionReceipt, ReceiptStatus, SCHEMA_RECEIPT, TestResult
 from recipe_engine.founder_runtime.state.states import MissionState
+from recipe_engine.founder_runtime.ids import hash_payload
+from recipe_engine.founder_runtime.adapters.fixture_governance import FixtureGovernance
 
 
 def _mission(state=MissionState.VERIFYING, del_status=DeliverableStatus.DELIVERED):
@@ -45,6 +47,7 @@ def _mission(state=MissionState.VERIFYING, del_status=DeliverableStatus.DELIVERE
 
 
 def _receipt(status=ReceiptStatus.SUCCESS):
+    decision = FixtureGovernance().decide("A0", action="c", scope="local_fixture")
     r = ExecutionReceipt(
         schema_version=SCHEMA_RECEIPT,
         receipt_id="r1",
@@ -57,17 +60,26 @@ def _receipt(status=ReceiptStatus.SUCCESS):
         ended_at="b",
         status=status,
         input_hash="i",
-        output_hash="o",
-        repository_metadata={},
+        output_hash="",
+        repository_metadata={"mutation": False},
         files_changed=[],
         tests=[TestResult("t", True)],
         artifacts=[],
         error=None,
-        authority_reference="a",
+        authority_reference=f"fixture_gov:{decision['decision_id']}:A0:allow",
+        authority_contract=decision,
         idempotency_key="k",
+        outcome_data={"result": "verified", "mutation": False},
     )
+    r.output_hash = hash_payload(r.outcome_data)
+    r.action_binding = f"{r.capability}:{r.input_hash}:{r.output_hash}"
     r.compute_hash()
     return r
+
+
+def _outcome():
+    body = {"outcome_id":"o1", "mission_id":"m1", "plan_id":"p1", "status":"verified", "result_hash":"result"}
+    return {**body, "outcome_hash": hash_payload(body)}
 
 
 class CompletionTests(unittest.TestCase):
@@ -77,7 +89,9 @@ class CompletionTests(unittest.TestCase):
             receipts=[_receipt()],
             artifacts=[{"artifact_id": "a1"}],
             approvals=[],
-            acceptance=[AcceptanceResult("a", True, "e")],
+            acceptance=[AcceptanceResult("a", True, "r1")],
+            outcome=_outcome(),
+            plan_id="p1",
             clock_now="t",
         )
         self.assertEqual(report.final_state, MissionState.COMPLETED)
@@ -104,18 +118,14 @@ class CompletionTests(unittest.TestCase):
                 clock_now="t",
             )
 
-    def test_completed_with_exceptions(self):
-        report = verify_completion(
-            _mission(),
-            receipts=[_receipt(ReceiptStatus.FAILURE)],
-            artifacts=[],
-            approvals=[],
-            acceptance=[AcceptanceResult("a", False, None)],
-            exceptions=["build_failed"],
-            clock_now="t",
-        )
-        self.assertEqual(report.final_state, MissionState.COMPLETED_WITH_EXCEPTIONS)
-        self.assertIn("build_failed", report.exceptions)
+    def test_exceptions_cannot_waive_truth_gates(self):
+        with self.assertRaises(CompletionCriteriaFailed):
+            verify_completion(
+                _mission(), receipts=[_receipt(ReceiptStatus.FAILURE)], artifacts=[], approvals=[],
+                acceptance=[AcceptanceResult("a", False, None)], exceptions=["build_failed"],
+                outcome=_outcome(),
+                clock_now="t",
+            )
 
 
 if __name__ == "__main__":

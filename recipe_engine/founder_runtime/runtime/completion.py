@@ -1,4 +1,4 @@
-"""Completion verifier."""
+"""Canonical completion verifier. No generic exception can waive truth gates."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from recipe_engine.founder_runtime.contracts.completion import CompletionReport,
 from recipe_engine.founder_runtime.contracts.receipts import ExecutionReceipt, ReceiptStatus
 from recipe_engine.founder_runtime.state.states import MissionState
 from recipe_engine.founder_runtime.state.transitions import is_transition_allowed
-from recipe_engine.founder_runtime.ids import new_uuid
+from recipe_engine.founder_runtime.ids import hash_payload
 
 
 def verify_completion(
@@ -21,70 +21,63 @@ def verify_completion(
     approvals: Sequence[Any],
     acceptance: Sequence[AcceptanceResult],
     exceptions: Sequence[str] = (),
-    require_outcome: bool = False,
+    outcome: dict[str, Any] | None = None,
+    require_outcome: bool = True,
     outcome_present: bool = False,
     clock_now: str = "",
     decision_packet_id: str | None = None,
     plan_id: str | None = None,
 ) -> CompletionReport:
-    # terminal transition allowed?
-    target = MissionState.COMPLETED_WITH_EXCEPTIONS if exceptions else MissionState.COMPLETED
+    target = MissionState.COMPLETED
     if not is_transition_allowed(mission.current_state, target) and mission.current_state not in (
-        MissionState.VERIFYING, MissionState.RECONCILING
+        MissionState.VERIFYING, MissionState.RECONCILING,
     ):
-        # allow if already verifying/reconciling path checked by caller transitioning first
-        if mission.current_state not in (MissionState.VERIFYING, MissionState.RECONCILING, MissionState.EXECUTING):
-            raise CompletionCriteriaFailed(
-                "terminal transition not allowed from current state",
-                {"state": mission.current_state.value, "target": target.value},
-            )
-
-    required = [d for d in mission.deliverables if d.required]
-    missing_del = [d.deliverable_id for d in required if d.status != DeliverableStatus.DELIVERED]
-    if missing_del and not exceptions:
-        raise CompletionCriteriaFailed("required deliverables missing", {"missing": missing_del})
-
-    failed_acceptance = [a for a in acceptance if not a.passed]
-    if failed_acceptance and not exceptions:
-        raise CompletionCriteriaFailed(
-            "acceptance criteria failed",
-            {"failed": [a.criterion for a in failed_acceptance]},
-        )
-
-    # receipts
+        raise CompletionCriteriaFailed("terminal transition not allowed", {"state": mission.current_state.value})
+    missing = [d.deliverable_id for d in mission.deliverables if d.required and d.status != DeliverableStatus.DELIVERED]
+    if missing:
+        raise CompletionCriteriaFailed("required deliverables missing", {"missing": missing})
+    if not acceptance or any(not a.passed or not a.evidence_ref for a in acceptance):
+        raise CompletionCriteriaFailed("acceptance requires passing stored evidence", {})
     if not receipts:
         raise CompletionCriteriaFailed("missing receipts", {})
-    invalid = [r.receipt_id for r in receipts if r.status == ReceiptStatus.FAILURE]
-    # failures only ok if disclosed in exceptions
-    if invalid and not exceptions:
-        raise CompletionCriteriaFailed("failed receipts without exceptions", {"receipts": invalid})
-
-    if require_outcome and not outcome_present:
-        raise CompletionCriteriaFailed("outcome reconciliation required", {})
-
-    if target == MissionState.COMPLETED_WITH_EXCEPTIONS and not exceptions:
-        raise CompletionCriteriaFailed("COMPLETED_WITH_EXCEPTIONS requires exception list", {})
-
+    if any(r.status != ReceiptStatus.SUCCESS or not r.receipt_hash or not r.output_hash for r in receipts):
+        raise CompletionCriteriaFailed("all mandatory receipts must be validated successes", {})
+    evidence_ids = {r.receipt_id for r in receipts} | {
+        str(a.get("artifact_id")) for a in artifacts if a.get("artifact_id")
+    }
+    if any(a.evidence_ref not in evidence_ids for a in acceptance):
+        raise CompletionCriteriaFailed("acceptance evidence reference unresolved", {})
+    if exceptions:
+        raise CompletionCriteriaFailed("generic completion exceptions cannot waive gates", {})
+    if require_outcome and not outcome:
+        raise CompletionCriteriaFailed("validated outcome required", {})
+    if outcome:
+        if outcome.get("mission_id") != mission.mission_id or outcome.get("plan_id") != (plan_id or mission.plan_id):
+            raise CompletionCriteriaFailed("outcome binding mismatch", {})
+        if not outcome.get("outcome_id") or not outcome.get("outcome_hash") or outcome.get("status") != "verified":
+            raise CompletionCriteriaFailed("outcome is not independently verifiable", {})
+        material = dict(outcome)
+        supplied = material.pop("outcome_hash")
+        if supplied != hash_payload(material):
+            raise CompletionCriteriaFailed("outcome hash mismatch", {})
     report = CompletionReport(
         schema_version=SCHEMA_COMPLETION,
         mission_id=mission.mission_id,
         objective=mission.objective,
         final_state=target,
-        delivered_artifacts=[a.get("artifact_id", a.get("pointer", "")) for a in artifacts],
+        delivered_artifacts=[a.get("artifact_id", "") for a in artifacts],
         acceptance_criteria_results=list(acceptance),
         evidence_refs=[r.receipt_id for r in receipts],
-        code_changes=[],
-        operational_changes=[],
+        code_changes=[], operational_changes=[],
         approvals_used=[getattr(a, "approval_id", str(a)) for a in approvals],
-        unresolved_items=list(exceptions),
-        remaining_risks=["fixture_only_no_live_verification"],
-        recommended_follow_on=["p2_live_adapters_after_governance"],
-        proposed_memory_updates=[],
-        completed_at=clock_now,
-        exceptions=list(exceptions),
-        decision_packet_id=decision_packet_id,
+        unresolved_items=[], remaining_risks=["fixture_evidence_cannot_authorize_live_mutation"],
+        recommended_follow_on=["p2_live_executor_signing_after_governance"],
+        proposed_memory_updates=[], completed_at=clock_now,
+        exceptions=[], decision_packet_id=decision_packet_id,
         plan_id=plan_id or mission.plan_id,
         idempotency_key=f"completion:{mission.mission_id}",
+        outcome_ref=None if not outcome else str(outcome["outcome_id"]),
+        authority_refs=sorted({r.authority_reference for r in receipts}),
     )
     report.compute_hash()
     return report

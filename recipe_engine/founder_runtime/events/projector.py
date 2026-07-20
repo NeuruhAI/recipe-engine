@@ -10,7 +10,9 @@ from copy import deepcopy
 from dataclasses import replace
 from typing import Any, Sequence
 
-from recipe_engine.founder_runtime.contracts.events import EventType, MissionEvent, SAME_STATE_EVENT_TYPES
+from recipe_engine.founder_runtime.contracts.events import (
+    EventType, MissionEvent, SAME_STATE_EVENT_TYPES, GENESIS_EVENT_HASH,
+)
 from recipe_engine.founder_runtime.contracts.mission import Mission, Deliverable, DeliverableStatus
 from recipe_engine.founder_runtime.errors import PersistenceConflict, MissionSchemaInvalid, StateTransitionInvalid
 from recipe_engine.founder_runtime.ids import hash_payload
@@ -108,6 +110,38 @@ def apply_event(mission: Mission | None, event: MissionEvent) -> Mission:
             consumed.append(aid)
         ext["approval_ids_consumed"] = consumed
         m.extensions = ext
+    elif et == EventType.AUTHORITY_CLASSIFIED:
+        from recipe_engine.founder_runtime.contracts.authority import AuthorityRequirement
+        requirements = (event.payload or {}).get("requirements") or []
+        if not requirements:
+            raise MissionSchemaInvalid("authority event missing requirements", {})
+        m.authority_requirements = [AuthorityRequirement.from_dict(x) for x in requirements]
+        ext = dict(m.extensions or {})
+        ext["authority_policy_version"] = (event.payload or {}).get("policy_version")
+        ext["authority_reason_code"] = (event.payload or {}).get("reason_code")
+        m.extensions = ext
+    elif et in {
+        EventType.RECEIPT_RECORDED, EventType.CHECKPOINT_RECORDED,
+        EventType.ARTIFACT_REGISTERED, EventType.OUTCOME_RECORDED,
+        EventType.GOVERNANCE_RECORDED, EventType.SIDE_EFFECT_MARKED,
+        EventType.SIDE_EFFECT_RECONCILED,
+    }:
+        ext = dict(m.extensions or {})
+        key = f"{et.value}_refs"
+        refs = list(ext.get(key) or [])
+        for ref in event.evidence_refs:
+            if ref not in refs:
+                refs.append(ref)
+        ext[key] = refs
+        m.extensions = ext
+    elif et == EventType.COMPLETION_RECORDED:
+        report = (event.payload or {}).get("completion_report") or {}
+        if not report.get("completion_hash"):
+            raise MissionSchemaInvalid("completion event report missing", {})
+        ext = dict(m.extensions or {})
+        ext["completion_hash"] = report["completion_hash"]
+        ext["outcome_ref"] = report.get("outcome_ref")
+        m.extensions = ext
     # other event types: state-only or audit-only
 
     m.current_state = event.next_state
@@ -124,8 +158,18 @@ def rebuild_mission_from_events(events: Sequence[MissionEvent]) -> Mission:
     mission: Mission | None = None
     prior_state: MissionState | None = None
     version = 0
-    for ev in events:
+    previous_hash = GENESIS_EVENT_HASH
+    for expected_position, ev in enumerate(events):
         stored_hash = ev.event_hash
+        if ev.chain_position != expected_position:
+            raise PersistenceConflict(
+                "event chain order violation",
+                {"event_id": ev.event_id, "expected": expected_position, "actual": ev.chain_position},
+            )
+        if ev.previous_event_hash != previous_hash:
+            raise PersistenceConflict(
+                "event chain predecessor violation", {"event_id": ev.event_id},
+            )
         if not ev.verify_hash():
             raise PersistenceConflict("event hash tamper detected", {"event_id": ev.event_id, "stored": stored_hash})
         # state machine for real transitions; same-state body events skip table
@@ -147,6 +191,7 @@ def rebuild_mission_from_events(events: Sequence[MissionEvent]) -> Mission:
         version += 1
         mission.version = version
         prior_state = ev.next_state
+        previous_hash = ev.event_hash
     if mission is None:
         raise PersistenceConflict("rebuild produced no mission", {})
     return mission

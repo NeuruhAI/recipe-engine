@@ -12,11 +12,10 @@ class LocalScheduler:
         self._q: list[tuple[str, Callable[[], Any]]] = []
 
     def enqueue(self, name: str, fn: Callable[[], Any]) -> None:
-        self._q.append((name, fn))
+        from .p2_gates import require_p2_gate
+        require_p2_gate("R-N")
 
     def drain(self) -> list[Any]:
-        results = []
-        while self._q:
-            name, fn = self._q.pop(0)
-            results.append({"name": name, "result": fn()})
-        return results
+        from .p2_gates import require_p2_gate
+        require_p2_gate("R-N")
+        return []

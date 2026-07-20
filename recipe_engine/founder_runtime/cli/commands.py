@@ -90,9 +90,10 @@ def cmd_verify_receipt(args, *, db_path: str) -> dict[str, Any]:
     receipt = ExecutionReceipt.from_dict(data)
     errs = validate_receipt(
         receipt,
-        expected_mission_id=receipt.mission_id,
-        expected_plan_id=receipt.plan_id,
-        expected_step_id=receipt.step_id,
-        expected_input_hash=receipt.input_hash,
+        expected_mission_id=args.mission,
+        expected_plan_id=args.plan,
+        expected_step_id=args.step,
+        expected_input_hash=args.input_hash,
+        expected_output_hash=args.output_hash,
     )
     return {"valid": len(errs) == 0, "errors": errs, "receipt_id": receipt.receipt_id}

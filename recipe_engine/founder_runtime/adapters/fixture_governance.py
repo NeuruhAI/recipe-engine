@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from recipe_engine.founder_runtime.contracts.authority import AuthorityClass, FIXTURE_POLICY
+from recipe_engine.founder_runtime.ids import hash_payload, stable_id
 from .base import BaseFixtureAdapter
 
 
@@ -24,7 +25,7 @@ class FixtureGovernance(BaseFixtureAdapter):
             enhanced = False
         if ac == AuthorityClass.A6:
             enhanced = True
-        return {
+        result = {
             "schema_version": "fr.gov_fixture.v1",
             "backend": "fixture",
             "authority_class": ac.value,
@@ -34,3 +35,6 @@ class FixtureGovernance(BaseFixtureAdapter):
             "enhanced": locals().get("enhanced", ac == AuthorityClass.A6),
             "policy_note": "fixture policy only; autonomous-governance-core remains real authority",
         }
+        result["decision_id"] = stable_id("fixture_gov", ac.value, action, scope, decision)
+        result["decision_hash"] = hash_payload(result)
+        return result

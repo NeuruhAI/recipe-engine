@@ -12,4 +12,6 @@ class RetryPolicy:
 
 
 def should_retry(attempt: int, policy: RetryPolicy) -> bool:
-    return attempt < policy.max_attempts
+    from .p2_gates import require_p2_gate
+    require_p2_gate("R-N")
+    return False

@@ -82,8 +82,6 @@ def run_system_status_slice(
 
     # Handle initial block request
     if mission.extensions.get("initial_block") == "BLOCKED_INPUT":
-        mission = runtime.transition(mid, MissionState.INTAKE, reason="intake_for_block")
-        mission = runtime.transition(mid, MissionState.BLOCKED_INPUT, reason="missing_input")
         return {
             "mission_id": mid,
             "status": "blocked_input",
@@ -104,8 +102,11 @@ def run_system_status_slice(
 
     mission = runtime.transition(mid, MissionState.PLANNING, reason="begin_planning")
 
-    # Fixture governance for A0
-    gdec = gov.decide(AuthorityClass.A0, action="system_status_readonly", scope="fixture")
+    # Governance opinion is bound to the trusted kernel classification.  It is
+    # fixture authority only and cannot authorize live mutation.
+    classified = mission.authority_requirements[0]
+    gdec = gov.decide(classified.authority_class, action=classified.action, scope=classified.scope)
+    runtime.record_governance(mid, gdec)
     if gdec["decision"] != "allow":
         mission = runtime.transition(mid, MissionState.AWAITING_APPROVAL, reason="gov_not_allow")
         return {"mission_id": mid, "status": "awaiting_approval", "governance": gdec}
@@ -402,10 +403,12 @@ def run_system_status_slice(
             step_id=step_id,
             capability=f"fixture.{step_id}",
             input_hash=input_hash,
-            authority_reference="fixture_gov:A0:allow",
+            authority_reference=f"fixture_gov:{gdec['decision_id']}:{classified.authority_class.value}:{gdec['decision']}",
+            authority_contract=gdec,
             started_at=now1,
             ended_at=now2,
             side_effect_key=se_key,
+            outcome_data=out_extra,
         )
         assert_valid_receipt(
             receipt,
@@ -413,10 +416,11 @@ def run_system_status_slice(
             expected_plan_id=plan_id,
             expected_step_id=step_id,
             expected_input_hash=input_hash,
+            expected_output=receipt.outcome_data,
         )
         runtime.record_receipt(receipt)
         for art in receipt.artifacts:
-            runtime.store.register_artifact(mid, art.to_dict(), now2)
+            runtime.register_artifact(mid, art.to_dict(), now2)
         runtime.mark_side_effect(se_key, mid, step_id, "acknowledged", {"step": step_id, "extra_hash": hash_payload(out_extra)}, receipt.receipt_id)
         receipts.append(receipt)
         completed.append(step_id)
@@ -491,14 +495,33 @@ def run_system_status_slice(
         runtime.set_deliverable_status(mid, did, DeliverableStatus.DELIVERED)
 
     mission = runtime.get_mission(mid)
+    receipt_by_step = {r.step_id: r.receipt_id for r in receipts}
     acceptance = [
-        AcceptanceResult("claims_present", bool(claims_payload.get("claims")), "ev_mother_health"),
-        AcceptanceResult("health_snapshot_present", bool(health_dict), health_dict.get("snapshot_id")),
-        AcceptanceResult("decision_packet_present", bool(packet_dict.get("packet_id") or packet_dict.get("selected")), packet_dict.get("packet_id")),
-        AcceptanceResult("plan_proposal_present", bool(plan_dict), plan_dict.get("plan_id") if isinstance(plan_dict, dict) else None),
-        AcceptanceResult("blocked_or_degraded_disclosed", True, "ev_mother_health"),
+        AcceptanceResult("claims_present", bool(claims_payload.get("claims")), receipt_by_step.get("compile_claims")),
+        AcceptanceResult("health_snapshot_present", bool(health_dict), receipt_by_step.get("read_mother_health")),
+        AcceptanceResult("decision_packet_present", bool(packet_dict.get("packet_id") or packet_dict.get("selected")), receipt_by_step.get("collapse_scenarios")),
+        AcceptanceResult("plan_proposal_present", bool(plan_dict), receipt_by_step.get("compile_plan_proposal")),
+        AcceptanceResult("blocked_or_degraded_disclosed", True, receipt_by_step.get("read_mother_health")),
     ]
     artifacts = runtime.store.list_artifacts(mid)
+    mission = runtime.transition(mid, MissionState.RECONCILING, reason="reconcile_outcomes")
+    receipt_hashes = sorted(r.receipt_hash for r in receipts)
+    deliverable_hash = hash_payload([d.to_dict() for d in runtime.get_mission(mid).deliverables])
+    outcome_material = {
+        "outcome_id": stable_id("outcome", mid, plan_id),
+        "mission_id": mid,
+        "plan_id": plan_id,
+        "status": "verified",
+        "receipt_hashes": receipt_hashes,
+        "deliverable_hash": deliverable_hash,
+        "result_hash": hash_payload({"receipt_hashes": receipt_hashes, "deliverable_hash": deliverable_hash, "mutation": False}),
+        "evidence_class": "fixture",
+        "mutation_authorized": False,
+    }
+    outcome = dict(outcome_material)
+    outcome["outcome_hash"] = hash_payload(outcome_material)
+    runtime.record_outcome(mid, outcome)
+    mission = runtime.get_mission(mid)
     report = verify_completion(
         mission,
         receipts=runtime.store.list_receipts(mid),
@@ -506,16 +529,10 @@ def run_system_status_slice(
         approvals=[],
         acceptance=acceptance,
         exceptions=[],
+        outcome=outcome,
         clock_now=runtime.clock.now_iso(),
         decision_packet_id=packet_dict.get("packet_id"),
         plan_id=plan_id,
-    )
-    mission = runtime.transition(mid, MissionState.RECONCILING, reason="reconcile_outcomes")
-    runtime.save_completion(report)
-    mission = runtime.transition(
-        mid, MissionState.COMPLETED, reason="completed_readonly_slice",
-        event_type=EventType.COMPLETION_RECORDED,
-        payload={"completion_hash": report.completion_hash},
     )
     runtime.checkpoint(
         mid,
@@ -526,6 +543,7 @@ def run_system_status_slice(
         kind="after_recovery",
         plan_id=plan_id,
     )
+    mission = runtime.complete_mission(report)
 
     replay = replay_mission(runtime.store, mid)
     return {

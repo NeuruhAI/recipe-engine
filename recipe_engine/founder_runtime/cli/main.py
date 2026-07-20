@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("verify-receipt", help="Validate a receipt JSON file")
     v.add_argument("--file", required=True)
+    v.add_argument("--mission", required=True)
+    v.add_argument("--plan", required=True)
+    v.add_argument("--step", required=True)
+    v.add_argument("--input-hash", required=True)
+    v.add_argument("--output-hash", required=True)
     return p
 
 

@@ -23,18 +23,19 @@ class FixtureAxon(BaseFixtureAdapter):
         capability: str,
         input_hash: str,
         authority_reference: str,
+        authority_contract: dict[str, Any] | None = None,
         started_at: str,
         ended_at: str,
         side_effect_key: str | None = None,
         force_failure: bool = False,
+        outcome_data: dict[str, Any] | None = None,
     ) -> ExecutionReceipt:
-        # No real execution — return pre-authored fixture receipt
-        output = {
-            "step_id": step_id,
-            "capability": capability,
-            "result": "fixture_ok" if not force_failure else "fixture_fail",
-            "mutation": False,
-        }
+        # Deterministic fixture evidence binds the actual allowlisted fixture
+        # result; callers cannot assert SUCCESS independently of that result.
+        output = dict(outcome_data or {})
+        output.update({"step_id": step_id, "capability": capability, "mutation": False})
+        if force_failure:
+            output["fixture_error"] = "forced_failure"
         output_hash = hash_payload(output)
         status = ReceiptStatus.FAILURE if force_failure else ReceiptStatus.SUCCESS
         receipt = ExecutionReceipt(
@@ -65,6 +66,13 @@ class FixtureAxon(BaseFixtureAdapter):
             authority_reference=authority_reference,
             idempotency_key=f"step:{mission_id}:{plan_id}:{step_id}",
             side_effect_key=side_effect_key,
+            evidence_class="fixture",
+            trust_level="fixture_only",
+            producer_identity="fixture_axon",
+            action_binding=f"{capability}:{input_hash}:{output_hash}",
+            outcome_data=output,
+            mutation_authorized=False,
+            authority_contract=dict(authority_contract or {}),
         )
         receipt.compute_hash()
         return receipt

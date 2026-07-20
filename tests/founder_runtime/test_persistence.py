@@ -53,25 +53,9 @@ class PersistenceTests(unittest.TestCase):
         m = self.rt.create_mission_from_text("x", creation_idempotency_key="e2")
         self.rt.transition(m.mission_id, MissionState.INTAKE, reason="in", idempotency_key="idem-in")
         v1 = self.rt.get_mission(m.mission_id).version
-        # re-append same event via store (duplicate delivery)
-        from recipe_engine.founder_runtime.contracts.events import MissionEvent, EventType, SCHEMA_EVENT
+        # re-append exact same event object (duplicate delivery)
         m = self.rt.get_mission(m.mission_id)
-        ev = MissionEvent(
-            schema_version=SCHEMA_EVENT,
-            event_id="evt_dup",
-            mission_id=m.mission_id,
-            prior_state=MissionState.DRAFT,
-            next_state=MissionState.INTAKE,
-            event_type=EventType.STATE_TRANSITION,
-            actor="runtime",
-            reason="in",
-            evidence_refs=[],
-            timestamp=self.clock.now_iso(),
-            idempotency_key="idem-in",
-            causation_id=None,
-            correlation_id=m.mission_id,
-        )
-        ev.compute_hash()
+        ev = [e for e in self.rt.store.list_events(m.mission_id) if e.idempotency_key == "idem-in"][0]
         again = self.rt.store.append_event(ev, expected_version=v1, mission_body=m)
         self.assertEqual(again.idempotency_key, "idem-in")
         v2 = self.rt.get_mission(m.mission_id).version

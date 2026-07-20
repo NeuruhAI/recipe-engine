@@ -82,36 +82,15 @@ class ExecutionReceipt:
     idempotency_key: str
     receipt_hash: str = ""
     side_effect_key: str | None = None
+    evidence_class: str = "fixture"
+    trust_level: str = "fixture_only"
+    producer_identity: str = "fixture_axon"
+    action_binding: str = ""
+    outcome_data: dict[str, Any] = field(default_factory=dict)
+    mutation_authorized: bool = False
+    authority_contract: dict[str, Any] = field(default_factory=dict)
 
-    def compute_hash(self) -> str:
-        body = {
-            "schema_version": self.schema_version,
-            "receipt_id": self.receipt_id,
-            "mission_id": self.mission_id,
-            "plan_id": self.plan_id,
-            "step_id": self.step_id,
-            "executor": self.executor,
-            "capability": self.capability,
-            "started_at": self.started_at,
-            "ended_at": self.ended_at,
-            "status": self.status.value,
-            "input_hash": self.input_hash,
-            "output_hash": self.output_hash,
-            "repository_metadata": dict(self.repository_metadata),
-            "files_changed": list(self.files_changed),
-            "tests": [t.to_dict() for t in self.tests],
-            "artifacts": [a.to_dict() for a in self.artifacts],
-            "error": self.error,
-            "authority_reference": self.authority_reference,
-            "idempotency_key": self.idempotency_key,
-            "side_effect_key": self.side_effect_key,
-        }
-        self.receipt_hash = hash_payload(body)
-        return self.receipt_hash
-
-    def to_dict(self) -> dict[str, Any]:
-        if not self.receipt_hash:
-            self.compute_hash()
+    def hash_material(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "receipt_id": self.receipt_id,
@@ -132,9 +111,25 @@ class ExecutionReceipt:
             "error": self.error,
             "authority_reference": self.authority_reference,
             "idempotency_key": self.idempotency_key,
-            "receipt_hash": self.receipt_hash,
             "side_effect_key": self.side_effect_key,
+            "evidence_class": self.evidence_class,
+            "trust_level": self.trust_level,
+            "producer_identity": self.producer_identity,
+            "action_binding": self.action_binding,
+            "outcome_data": dict(self.outcome_data),
+            "mutation_authorized": self.mutation_authorized,
+            "authority_contract": dict(self.authority_contract),
         }
+
+    def computed_hash(self) -> str:
+        return hash_payload(self.hash_material())
+
+    def compute_hash(self) -> str:
+        self.receipt_hash = self.computed_hash()
+        return self.receipt_hash
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.hash_material(), "receipt_hash": self.receipt_hash}
 
     @staticmethod
     def from_dict(d: Mapping[str, Any]) -> "ExecutionReceipt":
@@ -160,4 +155,11 @@ class ExecutionReceipt:
             idempotency_key=str(d["idempotency_key"]),
             receipt_hash=str(d.get("receipt_hash") or ""),
             side_effect_key=d.get("side_effect_key"),
+            evidence_class=str(d.get("evidence_class") or "fixture"),
+            trust_level=str(d.get("trust_level") or "fixture_only"),
+            producer_identity=str(d.get("producer_identity") or d.get("executor") or ""),
+            action_binding=str(d.get("action_binding") or ""),
+            outcome_data=dict(d.get("outcome_data") or {}),
+            mutation_authorized=bool(d.get("mutation_authorized", False)),
+            authority_contract=dict(d.get("authority_contract") or {}),
         )

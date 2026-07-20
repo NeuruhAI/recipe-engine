@@ -14,6 +14,7 @@ from recipe_engine.founder_runtime.errors import (
     PersistenceConflict,
 )
 from recipe_engine.founder_runtime.ids import new_uuid, hash_payload
+from recipe_engine.founder_runtime.serialization import to_canonical
 from recipe_engine.founder_runtime.persistence.sqlite import SqliteStore
 from recipe_engine.founder_runtime.contracts.mission import Mission, DeliverableStatus
 from recipe_engine.founder_runtime.contracts.events import (
@@ -21,6 +22,7 @@ from recipe_engine.founder_runtime.contracts.events import (
 )
 from recipe_engine.founder_runtime.contracts.approval import Approval, ApprovalDecision
 from recipe_engine.founder_runtime.contracts.receipts import ExecutionReceipt
+from recipe_engine.founder_runtime.contracts.completion import CompletionReport
 from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
 from recipe_engine.founder_runtime.state.state_machine import StateMachine
 from recipe_engine.founder_runtime.intent.compiler import compile_intent_to_mission
@@ -80,27 +82,27 @@ class MissionRuntime:
             clock_now=now,
             creation_idempotency_key=creation_idempotency_key,
         )
-        created = self.store.create_mission(mission)
+        creation_event = self._event(
+            mission, prior=None, next_state=mission.current_state,
+            etype=EventType.MISSION_CREATED, reason="mission_created",
+            idem=f"create:{mission.creation_idempotency_key or mission.mission_id}",
+            payload={"interpretation": interpretation, "mission_body": mission.to_dict()},
+        )
+        created = self.store.create_mission(mission, creation_event)
         if created.mission_id != mission.mission_id and creation_idempotency_key:
             self.metrics.inc("mission_create_idempotent")
             return created
-        if created.version == 0 and not self.store.list_events(created.mission_id):
-            # Anchor full mission body in creation event for rebuild
-            body = created.to_dict()
-            ev = self._event(
-                created,
-                prior=None,
-                next_state=created.current_state,
-                etype=EventType.MISSION_CREATED,
-                reason="mission_created",
-                idem=f"create:{created.creation_idempotency_key or created.mission_id}",
-                payload={
-                    "interpretation": interpretation,
-                    "mission_body": body,
-                },
+        if len(self.store.list_events(created.mission_id)) == 1:
+            authority_payload = {
+                "requirements": [r.to_dict() for r in created.authority_requirements],
+                "policy_version": created.authority_requirements[0].policy_version,
+                "reason_code": created.authority_requirements[0].reason_code,
+            }
+            created = self._record_same_state_event(
+                created.mission_id, EventType.AUTHORITY_CLASSIFIED,
+                "trusted_kernel_authority_classified", authority_payload,
+                f"authority:{created.mission_id}:{created.input_hash}",
             )
-            self.store.append_event(ev, expected_version=0, mission_body=created)
-            created = self.store.get_mission(created.mission_id) or created
         self.metrics.inc("missions_created")
         self.log.emit(
             event_type="mission_created",
@@ -131,6 +133,11 @@ class MissionRuntime:
     ) -> Mission:
         mission = self.get_mission(mission_id)
         prior = mission.current_state
+        if next_state in (MissionState.COMPLETED, MissionState.COMPLETED_WITH_EXCEPTIONS):
+            raise StateTransitionInvalid(
+                "completion is reachable only through complete_mission",
+                {"mission_id": mission_id},
+            )
 
         # Approval gate
         if is_approval_gated(prior, next_state):
@@ -206,8 +213,24 @@ class MissionRuntime:
             correlation_id=mission.mission_id,
             payload=payload or {},
         )
-        ev.compute_hash()
         return ev
+
+    def _record_same_state_event(
+        self, mission_id: str, event_type: EventType, reason: str,
+        payload: dict[str, Any], idempotency_key: str,
+        *, evidence_refs: list[str] | None = None,
+    ) -> Mission:
+        mission = self.get_mission(mission_id)
+        if mission.current_state in TERMINAL_STATES:
+            raise StateTransitionInvalid("terminal mission cannot append truth events", {})
+        ev = self._event(
+            mission, prior=mission.current_state, next_state=mission.current_state,
+            etype=event_type, reason=reason, idem=idempotency_key,
+            payload=payload, evidence_refs=evidence_refs or [],
+        )
+        StateMachine.assert_transition(mission.current_state, mission.current_state, event=ev, require_event=True)
+        self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        return self.get_mission(mission_id)
 
     def set_deliverable_status(
         self,
@@ -291,7 +314,11 @@ class MissionRuntime:
         if not approval.created_at:
             approval.created_at = now
         mission = self.get_mission(approval.mission_id)
-        saved = self.store.save_approval(approval)
+        existing = self.store.get_approval(approval.approval_id)
+        if existing is not None:
+            if existing.to_dict() != approval.to_dict():
+                raise PersistenceConflict("duplicate approval changed authority evidence", {"approval_id": approval.approval_id})
+            return existing
         # Append APPROVAL_RECORDED to event log (same-state audit event)
         idem = f"approval:{approval.idempotency_key or approval.approval_id}"
         ev = self._event(
@@ -318,7 +345,7 @@ class MissionRuntime:
             # if version raced, reload and try once with idempotent key
             mission = self.get_mission(approval.mission_id)
             self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
-        return saved
+        return self.store.save_approval(approval)
 
     def _consume_approval_for_transition(
         self,
@@ -341,19 +368,11 @@ class MissionRuntime:
             scope=scope,
             now_iso=now,
         )
-        # Mark consumed on approval record
+        # Compute the consumed record, then authorize it on-log before materializing.
         approval.decision = ApprovalDecision.CONSUMED
         approval.consumed_by = f"transition:{transition_reason}"
         approval.decided_at = now
         approval.compute_hash()
-        # Update approvals table by re-saving with same id — need update path
-        # save_approval is insert-or-idempotent; force update via SQL
-        c = self.store._c()
-        from recipe_engine.founder_runtime.serialization import to_canonical
-        c.execute(
-            "UPDATE approvals SET body_json=?, approval_hash=?, decision=? WHERE approval_id=?",
-            (to_canonical(approval.to_dict()), approval.approval_hash, approval.decision.value, approval.approval_id),
-        )
         # Append APPROVAL_CONSUMED event
         idem = f"approval_consumed:{approval_id}:{action}"
         ev = self._event(
@@ -373,6 +392,11 @@ class MissionRuntime:
         )
         StateMachine.assert_transition(mission.current_state, mission.current_state, event=ev, require_event=True)
         self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        c = self.store._c()
+        c.execute(
+            "UPDATE approvals SET body_json=?, approval_hash=?, decision=? WHERE approval_id=?",
+            (to_canonical(approval.to_dict()), approval.approval_hash, approval.decision.value, approval.approval_id),
+        )
         return approval
 
     def record_plan_compile_failure(
@@ -440,6 +464,23 @@ class MissionRuntime:
         return self.get_mission(mission_id)
 
     def record_receipt(self, receipt: ExecutionReceipt) -> ExecutionReceipt:
+        from recipe_engine.founder_runtime.evidence.validation import assert_valid_receipt
+        assert_valid_receipt(
+            receipt, expected_mission_id=receipt.mission_id,
+            expected_plan_id=receipt.plan_id, expected_step_id=receipt.step_id,
+            expected_input_hash=receipt.input_hash, expected_output=receipt.outcome_data,
+        )
+        existing = self.store.get_receipt(receipt.receipt_id)
+        if existing is not None:
+            if existing.to_dict() != receipt.to_dict():
+                raise PersistenceConflict("duplicate receipt changed evidence", {"receipt_id": receipt.receipt_id})
+            return existing
+        self._record_same_state_event(
+            receipt.mission_id, EventType.RECEIPT_RECORDED, "validated_receipt_recorded",
+            {"receipt": receipt.to_dict(), "trust_level": receipt.trust_level,
+             "producer_identity": receipt.producer_identity},
+            f"receipt:{receipt.idempotency_key}", evidence_refs=[receipt.receipt_id],
+        )
         return self.store.save_receipt(receipt)
 
     def checkpoint(
@@ -464,7 +505,66 @@ class MissionRuntime:
             kind=kind,
             plan_id=plan_id,
         )
+        self._record_same_state_event(
+            mission_id, EventType.CHECKPOINT_RECORDED, "checkpoint_recorded",
+            {"checkpoint": ck.to_dict()}, f"checkpoint:{ck.idempotency_key or ck.checkpoint_id}",
+            evidence_refs=[ck.checkpoint_id],
+        )
         return self.store.save_checkpoint(ck)
+
+    def register_artifact(self, mission_id: str, artifact: dict[str, Any], registered_at: str) -> dict[str, Any]:
+        self._record_same_state_event(
+            mission_id, EventType.ARTIFACT_REGISTERED, "artifact_registered",
+            {"artifact": dict(artifact), "registered_at": registered_at},
+            f"artifact:{artifact['artifact_id']}", evidence_refs=[artifact["artifact_id"]],
+        )
+        return self.store.register_artifact(mission_id, artifact, registered_at)
+
+    def record_outcome(self, mission_id: str, outcome: dict[str, Any]) -> dict[str, Any]:
+        required = {
+            "outcome_id", "mission_id", "plan_id", "status", "outcome_hash", "result_hash",
+            "receipt_hashes", "deliverable_hash", "mutation_authorized", "evidence_class",
+        }
+        if required - set(outcome) or outcome.get("mission_id") != mission_id or outcome.get("status") != "verified":
+            raise MissionSchemaInvalid("outcome evidence malformed", {})
+        material = dict(outcome)
+        supplied = material.pop("outcome_hash")
+        if supplied != hash_payload(material):
+            raise MissionSchemaInvalid("outcome evidence hash mismatch", {})
+        receipts = self.store.list_receipts(mission_id)
+        expected_receipts = sorted(r.receipt_hash for r in receipts)
+        mission = self.get_mission(mission_id)
+        expected_deliverables = hash_payload([d.to_dict() for d in mission.deliverables])
+        expected_result = hash_payload({
+            "receipt_hashes": expected_receipts,
+            "deliverable_hash": expected_deliverables,
+            "mutation": False,
+        })
+        if (
+            sorted(outcome.get("receipt_hashes") or []) != expected_receipts
+            or outcome.get("deliverable_hash") != expected_deliverables
+            or outcome.get("result_hash") != expected_result
+            or outcome.get("evidence_class") != "fixture"
+            or outcome.get("mutation_authorized") is not False
+        ):
+            raise MissionSchemaInvalid("outcome does not reconcile stored evidence", {})
+        self._record_same_state_event(
+            mission_id, EventType.OUTCOME_RECORDED, "verified_outcome_recorded",
+            {"outcome": dict(outcome)}, f"outcome:{outcome['outcome_id']}",
+            evidence_refs=[outcome["outcome_id"]],
+        )
+        self.store._c().execute(
+            "INSERT OR IGNORE INTO outcomes(outcome_id, mission_id, body_json, created_at) VALUES (?,?,?,?)",
+            (outcome["outcome_id"], mission_id, to_canonical(outcome), self.clock.now_iso()),
+        )
+        return outcome
+
+    def record_governance(self, mission_id: str, decision: dict[str, Any]) -> Mission:
+        return self._record_same_state_event(
+            mission_id, EventType.GOVERNANCE_RECORDED, "fixture_governance_opinion_recorded",
+            {"decision": dict(decision)}, f"governance:{decision['decision_id']}",
+            evidence_refs=[decision["decision_id"]],
+        )
 
     def inspect(self, mission_id: str) -> dict[str, Any]:
         mission = self.get_mission(mission_id)
@@ -492,7 +592,39 @@ class MissionRuntime:
         return result
 
     def mark_side_effect(self, key: str, mission_id: str, step_id: str, status: str, marker: dict[str, Any], receipt_id: str | None = None):
+        et = EventType.SIDE_EFFECT_RECONCILED if status == "reconciled" else EventType.SIDE_EFFECT_MARKED
+        self._record_same_state_event(
+            mission_id, et, "side_effect_state_recorded",
+            {"side_effect_key": key, "step_id": step_id, "status": status,
+             "marker": dict(marker), "receipt_id": receipt_id},
+            f"side_effect:{key}:{status}", evidence_refs=[] if not receipt_id else [receipt_id],
+        )
         return self.store.mark_side_effect(key, mission_id, step_id, status, marker, self.clock.now_iso(), receipt_id)
 
     def save_completion(self, report) -> Any:
-        return self.store.save_completion(report)
+        raise StateTransitionInvalid("use complete_mission; direct completion persistence is forbidden", {})
+
+    def complete_mission(self, report: CompletionReport) -> Mission:
+        mission = self.get_mission(report.mission_id)
+        if mission.current_state != MissionState.RECONCILING:
+            raise StateTransitionInvalid("completion requires RECONCILING", {})
+        if not report.completion_hash or report.completion_hash != report.computed_hash():
+            raise MissionSchemaInvalid("completion report hash invalid", {})
+        if report.final_state != MissionState.COMPLETED or not report.outcome_ref:
+            raise MissionSchemaInvalid("completion report is not canonical", {})
+        outcome = self.store._c().execute(
+            "SELECT 1 FROM outcomes WHERE outcome_id=? AND mission_id=?",
+            (report.outcome_ref, report.mission_id),
+        ).fetchone()
+        if not outcome:
+            raise MissionSchemaInvalid("completion outcome reference unresolved", {})
+        ev = self._event(
+            mission, prior=mission.current_state, next_state=MissionState.COMPLETED,
+            etype=EventType.COMPLETION_RECORDED, reason="canonical_completion_verified",
+            idem=report.idempotency_key, payload={"completion_report": report.to_dict()},
+            evidence_refs=list(report.evidence_refs) + [report.outcome_ref],
+        )
+        StateMachine.assert_transition(mission.current_state, MissionState.COMPLETED, event=ev, require_event=True)
+        self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+        self.store.save_completion(report)
+        return self.get_mission(report.mission_id)

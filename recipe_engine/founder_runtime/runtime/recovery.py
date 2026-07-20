@@ -70,7 +70,8 @@ def recover_mission(store, mission_id: str, *, clock_now: str) -> dict[str, Any]
                 "receipt_id": r.receipt_id,
             }
 
-    # side-effect ledger reconciliation
+    # R-M is deliberately deferred: recovery observes but never reconciles an
+    # external side effect.  No dispatcher consumes this plan in P1.2.
     side_effects = store.list_side_effects(mission_id)
     uncertain = [s for s in side_effects if s["status"] in ("proposed", "uncertain")]
     if uncertain:
@@ -78,15 +79,7 @@ def recover_mission(store, mission_id: str, *, clock_now: str) -> dict[str, Any]
         for se in uncertain:
             matching = [r for r in receipts if r.step_id == se["step_id"]]
             if matching:
-                store.mark_side_effect(
-                    se["side_effect_key"],
-                    mission_id,
-                    se["step_id"],
-                    "reconciled",
-                    se.get("marker") or {},
-                    clock_now,
-                    receipt_id=matching[0].receipt_id,
-                )
+                continue
             else:
                 return {
                     "status": RecoveryStatus.UNCERTAIN_SIDE_EFFECT.value,
@@ -141,4 +134,7 @@ def recover_mission(store, mission_id: str, *, clock_now: str) -> dict[str, Any]
             "projection_hash": replay["projection_hash"],
         },
         "do_not_rerun": sorted(completed),
+        "execution_resume_authorized": False,
+        "p2_gate": "R-L",
+        "reconciliation_mutation_authorized": False,
     }

@@ -10,7 +10,7 @@ from recipe_engine.founder_runtime.contracts.mission import (
     SCHEMA_MISSION, validate_mission_dict,
 )
 from recipe_engine.founder_runtime.state.states import MissionState
-from recipe_engine.founder_runtime.ids import new_uuid
+from recipe_engine.founder_runtime.ids import new_uuid, hash_payload, stable_id
 from recipe_engine.founder_runtime.adapters.fixture_iar import FixtureIAR
 from .deliverables import system_status_deliverables
 from .constraints import DEFAULT_CONSTRAINTS
@@ -18,13 +18,40 @@ from .authority import classify_authority
 
 
 def _validate_iar_output(raw: dict[str, Any]) -> dict[str, Any]:
-    required = ("schema_version", "backend", "model", "intent", "request_hash", "output_hash")
-    missing = [k for k in required if k not in raw]
+    required = {
+        "schema_version", "backend", "model", "principal_id", "intent", "ambiguity",
+        "objective", "entities", "candidate_strategy_hints", "risk_class", "authority_hint",
+        "request_hash", "output_hash", "receipt_id",
+    }
+    missing = sorted(required - set(raw))
     if missing:
         raise MissionSchemaInvalid("fixture IAR output missing fields", {"missing": missing})
     if raw.get("backend") != "fixture" or raw.get("model") != "fixture":
         raise MissionSchemaInvalid("IAR output must declare fixture backend/model", {"raw_backend": raw.get("backend")})
-    return raw
+    extra = sorted(set(raw) - required)
+    if extra:
+        raise MissionSchemaInvalid("fixture IAR output contains unknown fields", {"fields": extra})
+    if raw.get("schema_version") != "fr.iar_fixture.v1":
+        raise MissionSchemaInvalid("fixture IAR schema version rejected", {})
+    if raw.get("intent") not in {"system_status", "destructive", "material_choice", "unknown", "general"}:
+        raise MissionSchemaInvalid("fixture IAR intent rejected", {})
+    if raw.get("ambiguity") not in {"none", "low", "material", "irreversible", "impossible"}:
+        raise MissionSchemaInvalid("fixture IAR ambiguity rejected", {})
+    if raw.get("risk_class") not in {"low", "medium", "high", "critical"}:
+        raise MissionSchemaInvalid("fixture IAR risk class rejected", {})
+    if raw.get("authority_hint") not in {f"A{i}" for i in range(7)}:
+        raise MissionSchemaInvalid("fixture IAR authority hint malformed", {})
+    if raw.get("principal_id") != "jeramie" or not isinstance(raw.get("objective"), str):
+        raise MissionSchemaInvalid("fixture IAR identity/objective malformed", {})
+    if not isinstance(raw.get("entities"), list) or not isinstance(raw.get("candidate_strategy_hints"), list):
+        raise MissionSchemaInvalid("fixture IAR list fields malformed", {})
+    supplied_hash = raw.get("output_hash")
+    material = dict(raw)
+    material.pop("output_hash", None)
+    material.pop("receipt_id", None)
+    if supplied_hash != hash_payload(material):
+        raise MissionSchemaInvalid("fixture IAR output hash mismatch", {})
+    return dict(raw)
 
 
 def compile_intent_to_mission(
@@ -42,12 +69,17 @@ def compile_intent_to_mission(
 
     iar = iar or FixtureIAR(mode="fixture")
     interpretation = _validate_iar_output(iar.interpret(request_text, principal_id=principal.principal_id))
+    expected_request_hash = hash_payload({"text": request_text, "principal": principal.principal_id})
+    if interpretation["request_hash"] != expected_request_hash:
+        raise MissionSchemaInvalid("fixture IAR request binding mismatch", {})
+    if interpretation["receipt_id"] != stable_id("iar_receipt", expected_request_hash):
+        raise MissionSchemaInvalid("fixture IAR receipt binding mismatch", {})
     intent = interpretation["intent"]
     ambiguity = interpretation.get("ambiguity", "none")
 
     if ambiguity == "impossible":
         mission_class = MissionClass.GENERAL
-        state = MissionState.DRAFT
+        state = MissionState.BLOCKED_INPUT
         title = "Blocked: missing input"
         objective = "Clarify request — one precise question required"
         deliverables = []
@@ -88,7 +120,7 @@ def compile_intent_to_mission(
         desired_outcome="verified_status_and_safe_plan" if intent == "system_status" else "clarified_or_planned",
         deliverables=deliverables,
         constraints=list(DEFAULT_CONSTRAINTS),
-        authority_requirements=classify_authority(intent),
+        authority_requirements=classify_authority(request_text, canonical_action=intent),
         context_requirements=["founder_core", "architecture", "current_runtime"] if intent == "system_status" else ["founder_core"],
         verification_criteria=["receipts_valid", "deliverables_present", "replay_matches"],
         completion_rule="all_required_deliverables",

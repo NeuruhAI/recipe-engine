@@ -1,6 +1,6 @@
 """Local SQLite schema for Founder Runtime P1. No production DB."""
 
-SCHEMA_VERSION = "fr.sqlite.v1"
+SCHEMA_VERSION = "fr.sqlite.v2"
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -38,12 +38,16 @@ CREATE TABLE IF NOT EXISTS mission_events (
   reason TEXT NOT NULL,
   body_json TEXT NOT NULL,
   event_hash TEXT NOT NULL,
+  chain_position INTEGER NOT NULL,
+  previous_event_hash TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   timestamp TEXT NOT NULL,
   UNIQUE(mission_id, idempotency_key)
 );
 
 CREATE INDEX IF NOT EXISTS ix_events_mission ON mission_events(mission_id, sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_events_mission_chain
+  ON mission_events(mission_id, chain_position);
 
 CREATE TABLE IF NOT EXISTS checkpoints (
   checkpoint_id TEXT PRIMARY KEY,

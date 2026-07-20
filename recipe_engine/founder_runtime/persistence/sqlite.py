@@ -65,10 +65,13 @@ class SqliteStore:
         row = self._c().execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
         return row["value"] if row else ""
 
-    def create_mission(self, mission: Mission) -> Mission:
+    def create_mission(self, mission: Mission, creation_event: MissionEvent) -> Mission:
+        """Atomically create the projection and its genesis event."""
+        from recipe_engine.founder_runtime.contracts.events import EventType, GENESIS_EVENT_HASH, SCHEMA_EVENT
+        from recipe_engine.founder_runtime.events.projector import apply_event
+        from recipe_engine.founder_runtime.state.state_machine import StateMachine
+
         c = self._c()
-        body = mission.to_dict()
-        proj = hash_payload(body)
         try:
             c.execute("BEGIN IMMEDIATE")
             if mission.creation_idempotency_key:
@@ -79,35 +82,71 @@ class SqliteStore:
                 if existing:
                     c.execute("COMMIT")
                     return Mission.from_dict(json.loads(existing["body_json"]))
+            if (
+                creation_event.event_type != EventType.MISSION_CREATED
+                or creation_event.schema_version != SCHEMA_EVENT
+                or creation_event.mission_id != mission.mission_id
+                or creation_event.prior_state is not None
+                or (creation_event.payload or {}).get("mission_body") != mission.to_dict()
+            ):
+                c.execute("ROLLBACK")
+                raise PersistenceConflict("mission creation requires exact genesis event", {})
+            StateMachine.assert_transition(None, mission.current_state, event=creation_event, require_event=True)
+            creation_event.chain_position = 0
+            creation_event.previous_event_hash = GENESIS_EVENT_HASH
+            creation_event.compute_hash()
+            projected = apply_event(None, creation_event)
+            projected.version = 1
+            projected.updated_at = creation_event.timestamp
+            body = projected.to_dict()
+            proj = hash_payload(body)
             c.execute(
                 """INSERT INTO missions(
                     mission_id, version, current_state, body_json, input_hash,
                     creation_idempotency_key, created_at, updated_at, completed_at, projection_hash
                 ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    mission.mission_id,
-                    mission.version,
-                    mission.current_state.value,
+                    projected.mission_id,
+                    projected.version,
+                    projected.current_state.value,
                     to_canonical(body),
-                    mission.input_hash,
-                    mission.creation_idempotency_key or None,
-                    mission.created_at,
-                    mission.updated_at,
-                    mission.completed_at,
+                    projected.input_hash,
+                    projected.creation_idempotency_key or None,
+                    projected.created_at,
+                    projected.updated_at,
+                    projected.completed_at,
                     proj,
                 ),
             )
+            event_body = creation_event.to_dict()
+            cur = c.execute(
+                """INSERT INTO mission_events(
+                    event_id, mission_id, prior_state, next_state, event_type, actor, reason,
+                    body_json, event_hash, chain_position, previous_event_hash,
+                    idempotency_key, timestamp
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    creation_event.event_id, creation_event.mission_id, None,
+                    creation_event.next_state.value, creation_event.event_type.value,
+                    creation_event.actor, creation_event.reason, to_canonical(event_body),
+                    creation_event.event_hash, 0, GENESIS_EVENT_HASH,
+                    creation_event.idempotency_key, creation_event.timestamp,
+                ),
+            )
+            creation_event.sequence = cur.lastrowid
             c.execute("COMMIT")
-            return mission
+            return projected
         except sqlite3.IntegrityError as e:
-            c.execute("ROLLBACK")
+            if c.in_transaction:
+                c.execute("ROLLBACK")
             # duplicate mission id
             existing = self.get_mission(mission.mission_id)
             if existing and mission.creation_idempotency_key and existing.creation_idempotency_key == mission.creation_idempotency_key:
                 return existing
             raise PersistenceConflict("mission create conflict", {"error": str(e), "mission_id": mission.mission_id}) from e
         except Exception:
-            c.execute("ROLLBACK")
+            if c.in_transaction:
+                c.execute("ROLLBACK")
             raise
 
     def get_mission(self, mission_id: str) -> Mission | None:
@@ -139,11 +178,12 @@ class SqliteStore:
         Projection body is derived by applying the event to the stored mission
         (or mission_created payload). CAS enforces expected_version with rowcount.
         """
-        from recipe_engine.founder_runtime.events.projector import apply_event, projection_hash
+        from recipe_engine.founder_runtime.events.projector import apply_event
+        from recipe_engine.founder_runtime.contracts.events import GENESIS_EVENT_HASH, EventType, SCHEMA_EVENT
+        from recipe_engine.founder_runtime.state.state_machine import StateMachine
+        from recipe_engine.founder_runtime.state.states import TERMINAL_STATES
 
         c = self._c()
-        if not event.event_hash:
-            event.compute_hash()
         try:
             c.execute("BEGIN IMMEDIATE")
             # idempotent by mission+idempotency_key
@@ -152,9 +192,23 @@ class SqliteStore:
                 (event.mission_id, event.idempotency_key),
             ).fetchone()
             if existing:
-                c.execute("COMMIT")
                 ev = MissionEvent.from_dict(json.loads(existing["body_json"]))
                 ev.sequence = existing["sequence"]
+                # Idempotency is safe only for an exact duplicate delivery.
+                candidate = event.to_dict()
+                stored = ev.to_dict()
+                for body in (candidate, stored):
+                    body.pop("sequence", None)
+                    body.pop("event_hash", None)
+                    body.pop("chain_position", None)
+                    body.pop("previous_event_hash", None)
+                if candidate != stored:
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict(
+                        "idempotency key reused for different event",
+                        {"mission_id": event.mission_id, "idempotency_key": event.idempotency_key},
+                    )
+                c.execute("COMMIT")
                 return ev
             row = c.execute(
                 "SELECT version, body_json, projection_hash FROM missions WHERE mission_id=?",
@@ -170,16 +224,96 @@ class SqliteStore:
                     {"expected": expected_version, "actual": row["version"], "mission_id": event.mission_id},
                 )
             current = Mission.from_dict(json.loads(row["body_json"]))
-            # Prefer pure event application; mission_body only used as optional base for create
-            base = None if event.event_type.value == "mission_created" else current
-            if event.event_type.value == "mission_created":
-                # ensure payload has mission body
-                if not (event.payload or {}).get("mission_body"):
-                    # fallback: use stored or supplied
-                    body_src = mission_body.to_dict() if mission_body is not None else current.to_dict()
-                    event.payload = dict(event.payload or {})
-                    event.payload["mission_body"] = body_src
-                    event.compute_hash()
+            if current.current_state in TERMINAL_STATES:
+                c.execute("ROLLBACK")
+                raise PersistenceConflict(
+                    "terminal mission event append rejected",
+                    {"mission_id": event.mission_id, "state": current.current_state.value},
+                )
+            if (
+                event.schema_version != SCHEMA_EVENT
+                or event.event_type == EventType.MISSION_CREATED
+                or not event.idempotency_key
+                or not event.actor
+                or event.correlation_id != event.mission_id
+                or event.prior_state != current.current_state
+            ):
+                c.execute("ROLLBACK")
+                raise PersistenceConflict("event identity or prior-state binding invalid", {})
+            base = current
+            StateMachine.assert_transition(
+                current.current_state,
+                event.next_state,
+                event=event,
+                require_event=True,
+            )
+            if event.next_state.value in ("COMPLETED", "COMPLETED_WITH_EXCEPTIONS"):
+                if event.event_type != EventType.COMPLETION_RECORDED:
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion requires canonical completion event", {})
+                report = (event.payload or {}).get("completion_report")
+                if not isinstance(report, dict) or not report.get("completion_hash"):
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion event missing validated report", {})
+                parsed_report = CompletionReport.from_dict(report)
+                if parsed_report.completion_hash != parsed_report.computed_hash():
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion report hash mismatch", {})
+                if parsed_report.mission_id != event.mission_id or parsed_report.final_state != event.next_state:
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion report binding mismatch", {})
+                if not parsed_report.outcome_ref or not c.execute(
+                    "SELECT 1 FROM outcomes WHERE outcome_id=? AND mission_id=?",
+                    (parsed_report.outcome_ref, event.mission_id),
+                ).fetchone():
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion outcome unresolved", {})
+                stored_receipts = {r["receipt_id"] for r in c.execute(
+                    "SELECT receipt_id FROM receipts WHERE mission_id=?", (event.mission_id,)
+                ).fetchall()}
+                if not set(parsed_report.evidence_refs) or not set(parsed_report.evidence_refs).issubset(stored_receipts):
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion receipt references unresolved", {})
+                if parsed_report.exceptions or any(not a.passed or not a.evidence_ref for a in parsed_report.acceptance_criteria_results):
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion truth gate waived or acceptance failed", {})
+                accepted_refs = {a.evidence_ref for a in parsed_report.acceptance_criteria_results}
+                if not accepted_refs.issubset(stored_receipts):
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion acceptance references unresolved", {})
+                if any(d.required and d.status.value != "delivered" for d in current.deliverables):
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("required deliverables not delivered", {})
+                stored_artifacts = {r["artifact_id"] for r in c.execute(
+                    "SELECT artifact_id FROM artifacts WHERE mission_id=?", (event.mission_id,)
+                ).fetchall()}
+                if not set(parsed_report.delivered_artifacts).issubset(stored_artifacts):
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion artifact references unresolved", {})
+                receipt_authorities = {
+                    ExecutionReceipt.from_dict(json.loads(r["body_json"])).authority_reference
+                    for r in c.execute("SELECT body_json FROM receipts WHERE mission_id=?", (event.mission_id,)).fetchall()
+                }
+                if set(parsed_report.authority_refs) != receipt_authorities:
+                    c.execute("ROLLBACK")
+                    raise PersistenceConflict("completion authority references mismatch", {})
+
+            latest = c.execute(
+                "SELECT body_json FROM mission_events WHERE mission_id=? ORDER BY chain_position DESC LIMIT 1",
+                (event.mission_id,),
+            ).fetchone()
+            prior_event = MissionEvent.from_dict(json.loads(latest["body_json"])) if latest else None
+            expected_position = 0 if prior_event is None else int(prior_event.chain_position) + 1
+            expected_predecessor = GENESIS_EVENT_HASH if prior_event is None else prior_event.event_hash
+            if event.chain_position not in (None, expected_position):
+                c.execute("ROLLBACK")
+                raise PersistenceConflict("event chain position mismatch", {})
+            if event.previous_event_hash not in ("", expected_predecessor):
+                c.execute("ROLLBACK")
+                raise PersistenceConflict("event predecessor mismatch", {})
+            event.chain_position = expected_position
+            event.previous_event_hash = expected_predecessor
+            event.compute_hash()
             applied = apply_event(base, event)
             new_version = expected_version + 1
             applied.version = new_version
@@ -195,8 +329,9 @@ class SqliteStore:
             cur = c.execute(
                 """INSERT INTO mission_events(
                     event_id, mission_id, prior_state, next_state, event_type, actor, reason,
-                    body_json, event_hash, idempotency_key, timestamp
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    body_json, event_hash, chain_position, previous_event_hash,
+                    idempotency_key, timestamp
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     event.event_id,
                     event.mission_id,
@@ -207,6 +342,8 @@ class SqliteStore:
                     event.reason,
                     to_canonical(event_body),
                     event.event_hash,
+                    event.chain_position,
+                    event.previous_event_hash,
                     event.idempotency_key,
                     event.timestamp,
                 ),
@@ -246,6 +383,8 @@ class SqliteStore:
                 mission_body.extensions = applied.extensions
             return event
         except (PersistenceConflict, MissionNotFound):
+            if c.in_transaction:
+                c.execute("ROLLBACK")
             raise
         except sqlite3.IntegrityError as e:
             try:
@@ -282,6 +421,7 @@ class SqliteStore:
 
     def save_checkpoint(self, checkpoint: Checkpoint) -> Checkpoint:
         c = self._c()
+        self._require_logged_object(checkpoint.mission_id, "checkpoint_recorded", "checkpoint", checkpoint.to_dict())
         body = checkpoint.to_dict()
         try:
             c.execute("BEGIN IMMEDIATE")
@@ -342,6 +482,7 @@ class SqliteStore:
 
     def save_approval(self, approval: Approval) -> Approval:
         c = self._c()
+        self._require_logged_reference(approval.mission_id, "approval_recorded", approval.approval_id)
         if not approval.approval_hash:
             approval.compute_hash()
         body = approval.to_dict()
@@ -397,6 +538,7 @@ class SqliteStore:
 
     def save_receipt(self, receipt: ExecutionReceipt) -> ExecutionReceipt:
         c = self._c()
+        self._require_logged_object(receipt.mission_id, "receipt_recorded", "receipt", receipt.to_dict())
         if not receipt.receipt_hash:
             receipt.compute_hash()
         body = receipt.to_dict()
@@ -453,6 +595,7 @@ class SqliteStore:
 
     def register_artifact(self, mission_id: str, artifact: dict[str, Any], registered_at: str) -> dict[str, Any]:
         c = self._c()
+        self._require_logged_object(mission_id, "artifact_registered", "artifact", artifact)
         aid = artifact["artifact_id"]
         try:
             c.execute("BEGIN IMMEDIATE")
@@ -484,6 +627,14 @@ class SqliteStore:
 
     def save_completion(self, report: CompletionReport) -> CompletionReport:
         c = self._c()
+        if not report.completion_hash or report.completion_hash != report.computed_hash():
+            raise PersistenceConflict("completion hash invalid", {})
+        row = c.execute(
+            "SELECT body_json FROM mission_events WHERE mission_id=? AND event_type='completion_recorded' ORDER BY sequence DESC LIMIT 1",
+            (report.mission_id,),
+        ).fetchone()
+        if not row or (json.loads(row["body_json"]).get("payload") or {}).get("completion_report") != report.to_dict():
+            raise PersistenceConflict("completion not authorized by canonical event", {})
         if not report.completion_hash:
             report.compute_hash()
         body = report.to_dict()
@@ -547,6 +698,7 @@ class SqliteStore:
         receipt_id: str | None = None,
     ) -> dict[str, Any]:
         c = self._c()
+        self._require_logged_reference(mission_id, "side_effect_marked" if status != "reconciled" else "side_effect_reconciled", key)
         try:
             c.execute("BEGIN IMMEDIATE")
             ex = c.execute("SELECT * FROM side_effect_ledger WHERE side_effect_key=?", (key,)).fetchone()
@@ -801,3 +953,22 @@ class SqliteStore:
         if not events:
             raise MissionNotFound("no events for mission", {"mission_id": mission_id})
         return rebuild_mission_from_events(events)
+
+    def _event_payloads(self, mission_id: str, event_type: str) -> list[dict[str, Any]]:
+        rows = self._c().execute(
+            "SELECT body_json FROM mission_events WHERE mission_id=? AND event_type=? ORDER BY sequence",
+            (mission_id, event_type),
+        ).fetchall()
+        return [(json.loads(row["body_json"]).get("payload") or {}) for row in rows]
+
+    def _require_logged_object(self, mission_id: str, event_type: str, key: str, value: dict[str, Any]) -> None:
+        if not any(payload.get(key) == value for payload in self._event_payloads(mission_id, event_type)):
+            raise PersistenceConflict("mission truth mutation lacks canonical event", {"event_type": event_type})
+
+    def _require_logged_reference(self, mission_id: str, event_type: str, reference: str) -> None:
+        def contains(payload: dict[str, Any]) -> bool:
+            return reference in {
+                str(payload.get("approval_id") or ""), str(payload.get("side_effect_key") or ""),
+            }
+        if not any(contains(payload) for payload in self._event_payloads(mission_id, event_type)):
+            raise PersistenceConflict("mission truth mutation lacks canonical event", {"event_type": event_type})

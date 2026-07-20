@@ -38,6 +38,8 @@ class AuthorityRequirement:
     reason: str
     requires_approval: bool
     enhanced: bool = False
+    policy_version: str = "fr.authority.kernel.v1"
+    reason_code: str = "UNSPECIFIED"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +50,8 @@ class AuthorityRequirement:
             "reason": self.reason,
             "requires_approval": self.requires_approval,
             "enhanced": self.enhanced,
+            "policy_version": self.policy_version,
+            "reason_code": self.reason_code,
         }
 
     @staticmethod
@@ -60,4 +64,6 @@ class AuthorityRequirement:
             reason=d["reason"],
             requires_approval=bool(d["requires_approval"]),
             enhanced=bool(d.get("enhanced", False)),
+            policy_version=str(d.get("policy_version") or "fr.authority.kernel.v1"),
+            reason_code=str(d.get("reason_code") or "UNSPECIFIED"),
         )

@@ -37,11 +37,11 @@ class StateMachine:
                     "event prior_state mismatch",
                     {"event_prior": event.prior_state.value, "actual": prior.value},
                 )
-        # creation: prior None -> DRAFT or INTAKE via mission_created
+        # Missing required input is a real initial state, not an extension hint.
         if prior is None:
-            if next_state not in (MissionState.DRAFT, MissionState.INTAKE):
+            if next_state not in (MissionState.DRAFT, MissionState.INTAKE, MissionState.BLOCKED_INPUT):
                 raise StateTransitionInvalid(
-                    "initial state must be DRAFT or INTAKE",
+                    "initial state must be DRAFT, INTAKE, or BLOCKED_INPUT",
                     {"next": next_state.value},
                 )
             return

@@ -59,35 +59,10 @@ class CompletionReport:
     decision_packet_id: str | None = None
     plan_id: str | None = None
     idempotency_key: str = ""
+    outcome_ref: str | None = None
+    authority_refs: list[str] = field(default_factory=list)
 
-    def compute_hash(self) -> str:
-        body = {
-            "schema_version": self.schema_version,
-            "mission_id": self.mission_id,
-            "objective": self.objective,
-            "final_state": self.final_state.value,
-            "delivered_artifacts": list(self.delivered_artifacts),
-            "acceptance_criteria_results": [a.to_dict() for a in self.acceptance_criteria_results],
-            "evidence_refs": list(self.evidence_refs),
-            "code_changes": list(self.code_changes),
-            "operational_changes": list(self.operational_changes),
-            "approvals_used": list(self.approvals_used),
-            "unresolved_items": list(self.unresolved_items),
-            "remaining_risks": list(self.remaining_risks),
-            "recommended_follow_on": list(self.recommended_follow_on),
-            "proposed_memory_updates": list(self.proposed_memory_updates),
-            "completed_at": self.completed_at,
-            "exceptions": list(self.exceptions),
-            "decision_packet_id": self.decision_packet_id,
-            "plan_id": self.plan_id,
-            "idempotency_key": self.idempotency_key,
-        }
-        self.completion_hash = hash_payload(body)
-        return self.completion_hash
-
-    def to_dict(self) -> dict[str, Any]:
-        if not self.completion_hash:
-            self.compute_hash()
+    def hash_material(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "mission_id": self.mission_id,
@@ -104,12 +79,23 @@ class CompletionReport:
             "recommended_follow_on": list(self.recommended_follow_on),
             "proposed_memory_updates": list(self.proposed_memory_updates),
             "completed_at": self.completed_at,
-            "completion_hash": self.completion_hash,
             "exceptions": list(self.exceptions),
             "decision_packet_id": self.decision_packet_id,
             "plan_id": self.plan_id,
             "idempotency_key": self.idempotency_key,
+            "outcome_ref": self.outcome_ref,
+            "authority_refs": list(self.authority_refs),
         }
+
+    def computed_hash(self) -> str:
+        return hash_payload(self.hash_material())
+
+    def compute_hash(self) -> str:
+        self.completion_hash = self.computed_hash()
+        return self.completion_hash
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.hash_material(), "completion_hash": self.completion_hash}
 
     @staticmethod
     def from_dict(d: Mapping[str, Any]) -> "CompletionReport":
@@ -134,4 +120,6 @@ class CompletionReport:
             decision_packet_id=d.get("decision_packet_id"),
             plan_id=d.get("plan_id"),
             idempotency_key=str(d.get("idempotency_key") or ""),
+            outcome_ref=d.get("outcome_ref"),
+            authority_refs=list(d.get("authority_refs") or []),
         )

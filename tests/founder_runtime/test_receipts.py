@@ -13,9 +13,12 @@ from recipe_engine.founder_runtime.contracts.receipts import (
 )
 from recipe_engine.founder_runtime.evidence.validation import validate_receipt, assert_valid_receipt
 from recipe_engine.founder_runtime.errors import ReceiptInvalid
+from recipe_engine.founder_runtime.ids import hash_payload
+from recipe_engine.founder_runtime.adapters.fixture_governance import FixtureGovernance
 
 
 def _rcpt(**over):
+    decision = FixtureGovernance().decide("A0", action="fixture.read", scope="local_fixture")
     r = ExecutionReceipt(
         schema_version=SCHEMA_RECEIPT,
         receipt_id="r1",
@@ -28,15 +31,19 @@ def _rcpt(**over):
         ended_at="2026-07-19T00:00:01.000Z",
         status=ReceiptStatus.SUCCESS,
         input_hash="in1",
-        output_hash="out1",
-        repository_metadata={"mode": "fixture"},
+        output_hash="",
+        repository_metadata={"mode": "fixture", "mutation": False},
         files_changed=[],
         tests=[TestResult("t", True)],
         artifacts=[ArtifactRef("a1", "report", "h", "fixture://a1")],
         error=None,
-        authority_reference="gov:A0",
+        authority_reference=f"fixture_gov:{decision['decision_id']}:A0:allow",
+        authority_contract=decision,
         idempotency_key="idem1",
+        outcome_data={"result": "fixture", "mutation": False},
     )
+    r.output_hash = hash_payload(r.outcome_data)
+    r.action_binding = f"{r.capability}:{r.input_hash}:{r.output_hash}"
     r.compute_hash()
     for k, v in over.items():
         setattr(r, k, v)
