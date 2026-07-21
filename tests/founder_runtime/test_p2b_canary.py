@@ -99,7 +99,7 @@ class CanaryFullyLiveGreenTests(unittest.TestCase):
         qport, _ = stack.enter_context(H.mock_service(H.qdrant_routes()))
         mport, _ = stack.enter_context(H.mock_service({("GET", "/health"): (200, {"overall": "healthy", "dependencies": [], "blocked": []})}))
         iport, _ = stack.enter_context(H.mock_service({("GET", "/provenance"): (200, H.iar_provenance_body())}))
-        aport, _ = stack.enter_context(H.mock_service({("GET", "/world/neuruh_status/opinion"): (200, H.aegis_world_body())}))
+        aport, _ = stack.enter_context(H.mock_service({("GET", "/world/defensenet/opinion"): (200, H.aegis_world_body("defensenet"))}))
         gport, _ = stack.enter_context(H.mock_service({("POST", "/v1/evaluate"): self._governance_route()}))
         xport, _ = stack.enter_context(H.mock_service({("GET", "/health"): (200, H.axon_identity_body())}))
         return LiveAdapterSettings(

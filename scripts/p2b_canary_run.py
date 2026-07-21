@@ -24,7 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from recipe_engine.live_adapters.canary import run_live_readonly_canary, canary_signature
-from recipe_engine.live_adapters.canonical_topology import build_canonical_topology, read_endpoint_port_from_audit
+from recipe_engine.live_adapters.canonical_topology import (
+    CANONICAL_AEGIS_WORLD,
+    AegisWorldError,
+    build_canonical_topology,
+    read_endpoint_port_from_audit,
+)
 from recipe_engine.live_adapters.settings import LiveAdapterSettings, RepoRoot
 
 
@@ -66,9 +71,18 @@ def build_settings() -> LiveAdapterSettings:
 def main() -> int:
     label = sys.argv[1] if len(sys.argv) > 1 else "run"
     settings = build_settings()
-    result = run_live_readonly_canary(settings)
+    # Fixed allowlisted CLI/env selection of the AEGIS world, canonical default.
+    # Composition root reads the env; the canary allowlist-validates it (a mock or
+    # non-allowlisted world fails closed, never a fixture fallback).
+    requested_world = os.environ.get("P2B_AEGIS_WORLD")  # None => canonical default (defensenet)
+    try:
+        result = run_live_readonly_canary(settings, aegis_world=requested_world)
+    except AegisWorldError as exc:
+        print(json.dumps({"error": "AEGIS_WORLD_REJECTED", "detail": str(exc), "run_label": label}, indent=2))
+        return 2
     doc = result.to_dict()
     doc["run_label"] = label
+    doc["aegis_world"] = requested_world or CANONICAL_AEGIS_WORLD
     doc["signature"] = canary_signature(result)
     print(json.dumps(doc, indent=2))
     return 0

@@ -39,6 +39,7 @@ from recipe_engine.founder_runtime.adapters.registry import AdapterRegistry
 from recipe_engine.founder_runtime.contracts.authority import AuthorityClass
 from recipe_engine.founder_runtime.ids import hash_payload, stable_id
 from recipe_engine.live_adapters import LIVE_POLICY_VERSION
+from recipe_engine.live_adapters.canonical_topology import resolve_aegis_world
 from recipe_engine.live_adapters.registration import build_live_registry
 from recipe_engine.live_adapters.settings import LiveAdapterSettings
 
@@ -147,10 +148,20 @@ def run_live_readonly_canary(
     registry: AdapterRegistry | None = None,
     request_text: str = CANARY_REQUEST,
     github_repo: str = "NeuruhAI/recipe-engine",
-    aegis_world: str = "neuruh_status",
+    aegis_world: str | None = None,
     axon_path_id: str | None = None,
 ) -> CanaryResult:
-    """Run the ordered read-only canary once.  Deterministic and side-effect-safe."""
+    """Run the ordered read-only canary once.  Deterministic and side-effect-safe.
+
+    ``aegis_world`` selects the AEGIS world from the fixed live allowlist; ``None``
+    uses the canonical default (``defensenet``).  A mock-only world
+    (``neuruh_status``) or any non-allowlisted name is rejected fail-closed
+    (``AegisWorldError``) BEFORE the canary starts — never sent to AEGIS, never a
+    fixture fallback.
+    """
+    # Fail closed on the AEGIS world before any organ runs.  The mock default that
+    # 404s against real AEGIS is gone; the canonical real world is used instead.
+    aegis_world = resolve_aegis_world(aegis_world)
     registry = registry or build_live_registry(settings)
 
     # 1) Recipe Engine compile: a deterministic mission id bound to the request.

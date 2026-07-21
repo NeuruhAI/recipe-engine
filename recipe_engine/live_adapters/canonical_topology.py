@@ -39,9 +39,52 @@ CANONICAL_GOVERNANCE_SERVICE = "autonomous-governance-core"
 # The canonical eight-organ order (unchanged).
 CANONICAL_ORGAN_ORDER = ("github", "vault", "qdrant", "mother", "iar", "aegis", "governance", "axon_readonly")
 
+# --- AEGIS canary world selection -------------------------------------------
+# The AEGIS candidate serves a fixed inventory of real worlds; each is
+# validate_aegis_world-conformant.  The canary must select from THIS fixed
+# allowlist and never a caller-controlled or mock world.  The canonical default
+# is ``defensenet``: it is the world the reviewed AEGIS GREEN audit proved stable
+# and deterministic (byte-identical body + identical X-AEGIS-Provenance across
+# repeated reads; 50-read persistence probe unchanged) and the world the failed
+# integration diagnostic confirmed the canary reaches successfully.  A verdict of
+# CONTRADICTORY is a VALID opinion (adapter SUCCESS) per the AEGIS doctrine
+# ("contradiction is a valid opinion, not adapter failure").
+LIVE_AEGIS_WORLD_ALLOWLIST = frozenset(
+    {"aegis", "axiom", "defensenet", "latent", "natl", "signal-iq", "stormstack", "taxshield"}
+)
+CANONICAL_AEGIS_WORLD = "defensenet"
+# Worlds that exist ONLY as recipe-engine test/mocks — never served live; must be
+# rejected in live mode.
+MOCK_AEGIS_WORLDS = frozenset({"neuruh_status"})
+
 
 class TopologyError(LiveConfigError):
     """Raised when a topology deviates from the canonical promoted organ set."""
+
+
+class AegisWorldError(LiveConfigError):
+    """Raised when a canary AEGIS world is a mock or not on the live allowlist."""
+
+
+def resolve_aegis_world(requested: str | None = None) -> str:
+    """Resolve the AEGIS world for the live canary, fail-closed.
+
+    ``None`` -> the canonical default (``defensenet``).  A mock-only world
+    (``neuruh_status``) is rejected in live mode.  Any world not on the fixed live
+    allowlist is rejected (no arbitrary caller-controlled world names).  The value
+    is never a fixture/mock fallback and never a path (the AEGIS adapter also
+    rejects path-like ids).
+    """
+    if requested is None:
+        return CANONICAL_AEGIS_WORLD
+    world = str(requested)
+    if world in MOCK_AEGIS_WORLDS:
+        raise AegisWorldError(f"mock-only AEGIS world {world!r} is rejected in live mode")
+    if world not in LIVE_AEGIS_WORLD_ALLOWLIST:
+        raise AegisWorldError(
+            f"AEGIS world {world!r} is not on the live allowlist (fail closed)",
+        )
+    return world
 
 
 def _require_loopback_port(service: str, endpoint: LiveEndpoint) -> None:
