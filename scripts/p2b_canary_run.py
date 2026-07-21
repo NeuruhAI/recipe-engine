@@ -24,30 +24,41 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from recipe_engine.live_adapters.canary import run_live_readonly_canary, canary_signature
-from recipe_engine.live_adapters.settings import LiveAdapterSettings, LiveEndpoint, RepoRoot
+from recipe_engine.live_adapters.canonical_topology import build_canonical_topology, read_endpoint_port_from_audit
+from recipe_engine.live_adapters.settings import LiveAdapterSettings, RepoRoot
+
+
+def _newest_audit(root: str) -> str | None:
+    if not os.path.isdir(root):
+        return None
+    for name in sorted((d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))), reverse=True):
+        audit = os.path.join(root, name)
+        if os.path.isfile(os.path.join(audit, "FINAL_VERDICT.md")):
+            return audit
+    return None
 
 
 def build_settings() -> LiveAdapterSettings:
     home = os.path.expanduser("~")
-    return LiveAdapterSettings(
+    base = f"{home}/neuruh-workspace/audit-output"
+    # Mother + AEGIS endpoints come from their reviewed sealed GREEN audits.
+    mother_audit = _newest_audit(f"{base}/mother-p2b-readonly-http")
+    aegis_audit = _newest_audit(f"{base}/aegis-p2b-readonly-opinion-http")
+    if not mother_audit or not aegis_audit:
+        raise SystemExit("Mother/AEGIS GREEN audits not present — canonical topology cannot be built")
+    mother_port = read_endpoint_port_from_audit(mother_audit, "mother")
+    aegis_port = read_endpoint_port_from_audit(aegis_audit, "aegis")
+    # Canonical topology: Qdrant 6333, IAR 8090, Governance 8848, AXON 8300,
+    # Mother/AEGIS from audits; promoted SHAs pinned; fixed ports non-overridable.
+    return build_canonical_topology(
         repo_roots=(
             RepoRoot("NeuruhAI/recipe-engine", f"{home}/neuruh-repos/NeuruhAI/recipe-engine"),
             RepoRoot("NeuruhAI/neuruh-vault", f"{home}/neuruh-repos/NeuruhAI/neuruh-vault", role="vault_source"),
             RepoRoot("neuruh-vault-runtime", f"{home}/neuruh-vault", role="vault_runtime"),
         ),
-        endpoints=(
-            LiveEndpoint("qdrant", "127.0.0.1", 6333, "loopback"),
-            LiveEndpoint("mother", "127.0.0.1", 8077, "loopback"),
-            LiveEndpoint("iar", "127.0.0.1", 8090, "loopback"),
-            LiveEndpoint("aegis", "127.0.0.1", 8055, "loopback"),
-            LiveEndpoint("governance", "127.0.0.1", 8848, "loopback"),
-            LiveEndpoint("axon", "127.0.0.1", 8080, "loopback"),
-        ),
-        # Gate searches BOTH fixed allowlisted roots under this base
-        # (host-colima-integrity-recovery/ and host-colima-integrity-recovery-final/).
-        host_recovery_audit_base=f"{home}/neuruh-workspace/audit-output",
-        axon_source_sha="f3a94d1a68ac6b07525e962692901411bd43e6bf",
-        governance_source_sha="8e03131b628ba611d038551a47741623c3a80f4b",
+        mother_port=mother_port,
+        aegis_port=aegis_port,
+        host_recovery_audit_base=base,
         recipe_engine_sha="ead8a89e8724f9ba9ea5db8ce44cddf9e62db540",
     )
 

@@ -36,6 +36,7 @@ from recipe_engine.founder_runtime.errors import (
 )
 from recipe_engine.founder_runtime.ids import hash_payload, stable_id
 from recipe_engine.live_adapters.base_live import LiveAdapterBase, reject_mutation_shaped
+from recipe_engine.live_adapters.canonical_topology import CANONICAL_AXON_SHA, CANONICAL_AXON_VERSION
 from recipe_engine.live_adapters.settings import LiveAdapterSettings
 from recipe_engine.live_adapters.transport import LoopbackHttpClient, TransportDenied, TransportMalformed
 
@@ -82,18 +83,29 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(None, context="axon.identity")
+            # Verify the PROMOTED AXON identity: when a source SHA is pinned it
+            # must be the promoted f3a94d1 (a wrong-SHA service is rejected before
+            # any request).  The gateway build version (2.4.0-p1.1) is the
+            # on-the-wire corroboration.
+            if self._expected_sha and self._expected_sha != CANONICAL_AXON_SHA:
+                raise ProvenanceInvalid(
+                    "AXON source SHA is not the promoted f3a94d1",
+                    {"expected_promoted": CANONICAL_AXON_SHA, "configured": self._expected_sha},
+                )
             timeout = (meta.timeout_ms if meta and meta.timeout_ms else 5_000)
             resp = self._request("/health", timeout=timeout)
             if resp.status != 200:
                 raise TransportMalformed(f"axon health returned {resp.status}")
             body = resp.json()
             validated = validate_axon_identity(dict(body) if isinstance(body, Mapping) else {})
+            if validated["version"] != CANONICAL_AXON_VERSION:
+                raise ProvenanceInvalid("AXON gateway build version is not the promoted 2.4.0-p1.1", {"version": validated["version"]})
         except Exception as exc:  # noqa: BLE001
             return self.failure_result(operation=_OP_IDENTITY, meta=meta, exc=exc, duration_ms=_ms(t0))
         observed_sha = hash_payload(validated)
         dep = self.dependency_identity(
-            expected="2.4.0-p1.1", observed=validated["version"],
-            identity_verified=validated["version"] == "2.4.0-p1.1", readiness_verified=validated["status"] != "down",
+            expected=self._expected_sha or CANONICAL_AXON_SHA, observed=validated["version"],
+            identity_verified=validated["version"] == CANONICAL_AXON_VERSION, readiness_verified=validated["status"] != "down",
         ).to_dict()
         prov = self.live_provenance(
             logical="live://axon/health", observed_at=meta.observed_at or "1970-01-01T00:00:00.000Z",

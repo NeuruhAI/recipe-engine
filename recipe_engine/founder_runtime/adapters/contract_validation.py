@@ -188,12 +188,30 @@ def validate_aegis_world(payload: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value)
 
 
+GOVERNANCE_HEALTH_REQUIRED = frozenset({"ok", "service"})
+
+
 def validate_governance_health(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Required-key SUBSET validation for the promoted UP-2 Governance /health.
+
+    Every required field must be present with the correct type/value; additional
+    documented health metadata (e.g. version, uptime) is PERMITTED and does not
+    fail validation.  Unknown data never grants authority: only the trusted
+    required fields are returned, so downstream code cannot elevate an extra key
+    into an authority-bearing claim.  Missing or malformed required fields still
+    fail closed.
+    """
     value = _require_mapping(payload, "Governance health")
-    _require_exact_keys(value, {"ok", "service"}, "Governance health")
-    if value != {"ok": True, "service": "autonomous-governance-core"}:
-        raise MalformedResponse("Governance health identity is invalid", {})
-    return dict(value)
+    missing = GOVERNANCE_HEALTH_REQUIRED - set(value)
+    if missing:
+        raise MalformedResponse("Governance health missing required field(s)", {"missing": sorted(missing)})
+    if value["ok"] is not True:
+        raise MalformedResponse("Governance health 'ok' must be boolean true", {"ok": value.get("ok")})
+    if value["service"] != "autonomous-governance-core":
+        raise MalformedResponse("Governance service identity is invalid", {"service": value.get("service")})
+    # Return only the trusted required fields — extra metadata is permitted on the
+    # wire but is never carried forward as authority.
+    return {"ok": True, "service": "autonomous-governance-core"}
 
 
 def validate_governance_decision(payload: Mapping[str, Any]) -> dict[str, Any]:
