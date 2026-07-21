@@ -40,39 +40,42 @@ def _real_settings(td: Path) -> LiveAdapterSettings:
             H.endpoint("qdrant", 1), H.endpoint("mother", 1), H.endpoint("iar", 1),
             H.endpoint("aegis", 1), H.endpoint("governance", 1), H.endpoint("axon", 1),
         ),
-        host_recovery_audit_root=f"{HOME}/neuruh-workspace/audit-output/host-colima-integrity-recovery",
+        # Post-repair: search BOTH allowlisted roots under the real workspace base.
+        host_recovery_audit_base=f"{HOME}/neuruh-workspace/audit-output",
         recipe_engine_sha="ead8a89e8724f9ba9ea5db8ce44cddf9e62db540",
     )
 
 
 class CanaryRealEnvHoldTests(unittest.TestCase):
-    def test_holds_at_qdrant_gate_no_fallback(self):
-        with tempfile.TemporaryDirectory() as td:
-            s = _real_settings(Path(td))
-            r1 = run_live_readonly_canary(s)
-            self.assertEqual(r1.verdict, "HOLD")
-            self.assertEqual(r1.hold_organ, "qdrant")
-            self.assertIn("qdrant", (r1.hold_reason or ""))
-            # organs BEFORE qdrant were live successes (git + vault)
-            statuses = {o.organ: o.status for o in r1.observations}
-            self.assertEqual(statuses.get("github"), "success")
-            self.assertEqual(statuses.get("vault"), "success")
-            self.assertEqual(statuses.get("qdrant"), "denied")
-            # honest HOLD invariants
-            self.assertFalse(r1.fixture_fallback_used)
-            self.assertFalse(r1.mutation_observed)
-            self.assertFalse(r1.production_persistence)
-            self.assertFalse(r1.external_communication)
-            for o in r1.observations:
-                self.assertEqual(o.adapter_mode, "live")
-                self.assertFalse(o.fallback_used)
+    def test_gate_opens_but_canary_holds_on_service_availability(self):
+        # Post-repair the host gate OPENS against the real authoritative GREEN
+        # audit; with the organ endpoints closed (port 1) the canary still HOLDs
+        # on service availability — no fixture fallback, no mutation.
+        from recipe_engine.live_adapters.live_qdrant import LiveQdrantAdapter
+        s = _real_settings(Path("/tmp"))
+        self.assertTrue(LiveQdrantAdapter(s).gate_decision().open, "real GREEN audit must open the gate")
+        r1 = run_live_readonly_canary(s)
+        self.assertEqual(r1.verdict, "HOLD")
+        statuses = {o.organ: o.status for o in r1.observations}
+        self.assertEqual(statuses.get("github"), "success")
+        self.assertEqual(statuses.get("vault"), "success")
+        # qdrant gate is OPEN now; the closed endpoint yields UNAVAILABLE, not the
+        # DENIED-by-seal of the pre-repair world.
+        self.assertEqual(statuses.get("qdrant"), "unavailable")
+        self.assertEqual(r1.hold_organ, "qdrant")
+        self.assertFalse(r1.fixture_fallback_used)
+        self.assertFalse(r1.mutation_observed)
+        self.assertFalse(r1.production_persistence)
+        self.assertFalse(r1.external_communication)
+        for o in r1.observations:
+            self.assertEqual(o.adapter_mode, "live")
+            self.assertFalse(o.fallback_used)
 
     def test_real_env_hold_deterministic_on_replay(self):
-        with tempfile.TemporaryDirectory() as td:
-            s = _real_settings(Path(td))
-            r1 = run_live_readonly_canary(s)
-            r2 = run_live_readonly_canary(s)
-            self.assertEqual(canary_signature(r1), canary_signature(r2))
+        s = _real_settings(Path("/tmp"))
+        r1 = run_live_readonly_canary(s)
+        r2 = run_live_readonly_canary(s)
+        self.assertEqual(canary_signature(r1), canary_signature(r2))
 
 
 class CanaryFullyLiveGreenTests(unittest.TestCase):
@@ -90,8 +93,8 @@ class CanaryFullyLiveGreenTests(unittest.TestCase):
         H.make_git_repo(gh, origin="https://github.com/NeuruhAI/recipe-engine.git")
         H.make_git_repo(vs)
         H.make_git_repo(vr, extra_commit=True)
-        # green host recovery audit
-        H.make_green_host_audit(Path(td) / "host")
+        # sealed GREEN host recovery audit under a hermetic temp base
+        H.write_sealed_audit(Path(td) / "host")
         # one mock server per organ (distinct ports avoid path collisions)
         qport, _ = stack.enter_context(H.mock_service(H.qdrant_routes()))
         mport, _ = stack.enter_context(H.mock_service({("GET", "/health"): (200, {"overall": "healthy", "dependencies": [], "blocked": []})}))
@@ -109,7 +112,7 @@ class CanaryFullyLiveGreenTests(unittest.TestCase):
                 H.endpoint("qdrant", qport), H.endpoint("mother", mport), H.endpoint("iar", iport),
                 H.endpoint("aegis", aport), H.endpoint("governance", gport), H.endpoint("axon", xport),
             ),
-            host_recovery_audit_root=str(Path(td) / "host"),
+            host_recovery_audit_base=str(Path(td) / "host"),
             recipe_engine_sha="ead8a89",
         )
 

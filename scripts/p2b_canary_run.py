@@ -43,7 +43,9 @@ def build_settings() -> LiveAdapterSettings:
             LiveEndpoint("governance", "127.0.0.1", 8848, "loopback"),
             LiveEndpoint("axon", "127.0.0.1", 8080, "loopback"),
         ),
-        host_recovery_audit_root=f"{home}/neuruh-workspace/audit-output/host-colima-integrity-recovery",
+        # Gate searches BOTH fixed allowlisted roots under this base
+        # (host-colima-integrity-recovery/ and host-colima-integrity-recovery-final/).
+        host_recovery_audit_base=f"{home}/neuruh-workspace/audit-output",
         axon_source_sha="f3a94d1a68ac6b07525e962692901411bd43e6bf",
         governance_source_sha="8e03131b628ba611d038551a47741623c3a80f4b",
         recipe_engine_sha="ead8a89e8724f9ba9ea5db8ce44cddf9e62db540",

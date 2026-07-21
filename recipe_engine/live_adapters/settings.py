@@ -76,7 +76,12 @@ class LiveAdapterSettings:
     endpoints: tuple[LiveEndpoint, ...] = ()
     qdrant_collection: str = "neuruh_vault_canon"
     qdrant_point_baseline: int = 3049
+    # Deprecated (P2-B host-gate-compat): a single caller-supplied audit *root* is
+    # no longer honored by the gate — kept only for backward field-compatibility.
     host_recovery_audit_root: str | None = None
+    # The *base* directory under which the gate searches its two fixed allowlisted
+    # root names.  None ⇒ the gate's pinned default (~/neuruh-workspace/audit-output).
+    host_recovery_audit_base: str | None = None
     axon_source_sha: str = ""          # expected AXON ratified read-only main SHA
     governance_source_sha: str = ""    # expected Governance promoted main SHA
     recipe_engine_sha: str = ""        # this adapter package's owning source sha

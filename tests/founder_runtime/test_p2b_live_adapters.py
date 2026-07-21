@@ -139,13 +139,11 @@ class VaultLiveTests(unittest.TestCase):
 # ===================================================================== Qdrant
 class QdrantGateTests(unittest.TestCase):
     def test_gate_sealed_denies_without_contact(self):
-        # audit root with only a HOLD => sealed
+        # base with only a HOLD audit => gate sealed => denied without contact
         with tempfile.TemporaryDirectory() as td:
-            audit = Path(td) / "20260721T000000Z"
-            audit.mkdir(parents=True)
-            (audit / "FINAL_VERDICT.md").write_text("## VERDICT: HOLD\ncontinuing I/O corruption: YES\n")
+            H.write_sealed_audit(Path(td), root_name=H.ROOT_LEGACY, ts="20260721T000000Z", verdict="HOLD", aliases="legacy", io_clear=False)
             ep = H.endpoint("qdrant", 1)  # unreachable port; must NOT be contacted
-            s = H.settings_with(endpoints=(ep,), host_recovery_audit_root=str(td))
+            s = H.settings_with(endpoints=(ep,), host_recovery_audit_base=str(td))
             a = LiveQdrantAdapter(s, http=H.http_client(ep))
             res = a.verify_collection(_meta())
             self.assertEqual(res.status, "denied")
@@ -155,10 +153,10 @@ class QdrantGateTests(unittest.TestCase):
 
     def test_gate_open_live_verification_3049(self):
         with tempfile.TemporaryDirectory() as td:
-            H.make_green_host_audit(Path(td))
+            H.write_sealed_audit(Path(td))  # GREEN final
             with H.mock_service(H.qdrant_routes()) as (port, _srv):
                 ep = H.endpoint("qdrant", port)
-                s = H.settings_with(endpoints=(ep,), host_recovery_audit_root=str(td))
+                s = H.settings_with(endpoints=(ep,), host_recovery_audit_base=str(td))
                 a = LiveQdrantAdapter(s, http=H.http_client(ep))
                 self.assertTrue(a.gate_decision().open)
                 res = a.verify_collection(_meta())
@@ -169,19 +167,19 @@ class QdrantGateTests(unittest.TestCase):
 
     def test_gate_open_count_drift_malformed(self):
         with tempfile.TemporaryDirectory() as td:
-            H.make_green_host_audit(Path(td))
+            H.write_sealed_audit(Path(td))
             with H.mock_service(H.qdrant_routes(count=3049, count_after=3048)) as (port, _srv):
                 ep = H.endpoint("qdrant", port)
-                s = H.settings_with(endpoints=(ep,), host_recovery_audit_root=str(td))
+                s = H.settings_with(endpoints=(ep,), host_recovery_audit_base=str(td))
                 res = LiveQdrantAdapter(s, http=H.http_client(ep)).verify_collection(_meta())
                 self.assertEqual(res.status, "malformed")
 
     def test_gate_open_wrong_count_baseline_malformed(self):
         with tempfile.TemporaryDirectory() as td:
-            H.make_green_host_audit(Path(td))
+            H.write_sealed_audit(Path(td))
             with H.mock_service(H.qdrant_routes(count=99)) as (port, _srv):
                 ep = H.endpoint("qdrant", port)
-                s = H.settings_with(endpoints=(ep,), host_recovery_audit_root=str(td))
+                s = H.settings_with(endpoints=(ep,), host_recovery_audit_base=str(td))
                 res = LiveQdrantAdapter(s, http=H.http_client(ep)).verify_collection(_meta())
                 self.assertEqual(res.status, "malformed")
 

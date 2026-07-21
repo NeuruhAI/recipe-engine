@@ -64,8 +64,12 @@ class LiveQdrantAdapter(LiveAdapterBase):
     ):
         super().__init__(settings)
         self._http = http or LoopbackHttpClient(settings.endpoint_map())
+        # The gate is pinned to two fixed allowlisted root NAMES under an audit
+        # base (default: the workspace).  A caller cannot inject an arbitrary root.
         self._gate = gate or HostRecoveryGate(
-            settings.host_recovery_audit_root, required_count=settings.qdrant_point_baseline
+            settings.host_recovery_audit_base,
+            required_count=settings.qdrant_point_baseline,
+            collection=settings.qdrant_collection,
         )
         self._collection = settings.qdrant_collection
 
