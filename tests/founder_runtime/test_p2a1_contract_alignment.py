@@ -515,9 +515,12 @@ class PureResponseValidatorTests(unittest.TestCase):
 
     def test_axon_identity_tools_and_traversal(self):
         identity = {
-            "status": "healthy", "version": "2.4.0-p1.1",
-            "inference": {"authority": "iar", "provider": "local", "model": "m", "health": "ok"},
-            "execution_available": True, "degraded_reason": None,
+            "status": "healthy", "version": "2.4.0-p1.1", "uptime": 1,
+            "services": {"coordinator": True, "toolRegistry": True, "governance": True,
+                         "governedExecutor": True, "bonsai": False, "ollama": True, "iar": True},
+            "inference": {"authority": "iar", "provider": "local", "model": "m", "healthy": True},
+            "bonsai": {"healthy": False, "required": False},
+            "execution_available": True, "bonsai_required": False, "degraded_reason": None,
         }
         self.assertEqual(validate_axon_identity(identity)["version"], "2.4.0-p1.1")
         self.assertEqual(validate_axon_tools({"tools": ["file_read"]})["tools"], ["file_read"])

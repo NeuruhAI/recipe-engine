@@ -38,6 +38,22 @@ AXON_CONTAINMENT_CODES = frozenset(
     {"E_TRAVERSAL", "E_OUT_OF_WORKTREE", "E_SYMLINK_ESCAPE", "E_PRODUCTION_TARGET"}
 )
 AXON_TOOL_ALLOWLIST = frozenset({"file_read", "web_fetch"})
+# Reviewed endpoint-specific schema for GET /health of the promoted AXON
+# gateway f3a94d1a (v2.4.0-p1.1), transcribed from src/gateway/types.ts
+# HealthResponse and the server.ts /health handler.  inference_backend and
+# status_reason are optional in the reviewed type; every other field is
+# required; ANY other field — top-level or nested — fails closed.
+AXON_HEALTH_REQUIRED_KEYS = frozenset(
+    {
+        "status", "version", "uptime", "services", "inference", "bonsai",
+        "execution_available", "bonsai_required", "degraded_reason",
+    }
+)
+AXON_HEALTH_OPTIONAL_KEYS = frozenset({"inference_backend", "status_reason"})
+AXON_HEALTH_SERVICE_KEYS = frozenset(
+    {"coordinator", "toolRegistry", "governance", "governedExecutor", "bonsai", "ollama", "iar"}
+)
+AXON_INFERENCE_KEYS = frozenset({"authority", "provider", "model", "healthy"})
 
 
 def _require_mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -244,16 +260,74 @@ def validate_governance_decision(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_axon_identity(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Endpoint-specific validation of the promoted AXON gateway GET /health.
+
+    The reviewed schema is the v2.4.0-p1.1 health aggregation served by the
+    promoted gateway f3a94d1a: nine required fields, two optional aliases,
+    exact nested key sets.  This is NOT a superset allowance — an unknown
+    field, top-level or nested, still fails closed.
+
+    Explicit normalization boundary: only the canonical identity/health
+    evidence is carried forward — status, version, the IAR-authority inference
+    health, the governance service flag, and degraded_reason.  The governed-
+    execution surface flags (``execution_available``, ``services``, ``bonsai``,
+    ``uptime``) are validated on the wire as health evidence but are NOT
+    normalized into the receipt: nothing in this response is ever converted
+    into execution or mutation authority.
+    """
     value = _require_mapping(payload, "AXON identity")
-    keys = {"status", "version", "inference", "execution_available", "degraded_reason"}
-    _require_exact_keys(value, keys, "AXON identity")
+    unknown = set(value) - AXON_HEALTH_REQUIRED_KEYS - AXON_HEALTH_OPTIONAL_KEYS
+    if unknown:
+        raise MalformedResponse("AXON health has unreviewed field(s)", {"unexpected": sorted(unknown)})
+    missing = AXON_HEALTH_REQUIRED_KEYS - set(value)
+    if missing:
+        raise MalformedResponse("AXON health missing required field(s)", {"missing": sorted(missing)})
     if value["status"] not in {"healthy", "degraded", "down"} or value["version"] != "2.4.0-p1.1":
         raise ProvenanceInvalid("AXON identity/version mismatch", {})
+    if isinstance(value["uptime"], bool) or not isinstance(value["uptime"], int) or value["uptime"] < 0:
+        raise MalformedResponse("AXON uptime is invalid", {})
+    services = _require_mapping(value["services"], "AXON services health")
+    _require_exact_keys(services, AXON_HEALTH_SERVICE_KEYS, "AXON services health")
+    if any(not isinstance(services[key], bool) for key in AXON_HEALTH_SERVICE_KEYS):
+        raise MalformedResponse("AXON service health flags must be booleans", {})
     inference = _require_mapping(value["inference"], "AXON inference identity")
-    _require_exact_keys(inference, {"authority", "provider", "model", "health"}, "AXON inference identity")
+    _require_exact_keys(inference, AXON_INFERENCE_KEYS, "AXON inference identity")
+    if inference["authority"] != "iar":
+        raise ProvenanceInvalid("AXON inference authority must be IAR", {"authority": inference.get("authority")})
+    if not isinstance(inference["healthy"], bool):
+        raise MalformedResponse("AXON inference health is invalid", {})
+    for key in ("provider", "model"):
+        if inference[key] is not None and not isinstance(inference[key], str):
+            raise MalformedResponse("AXON inference backend identity is invalid", {"field": key})
+    bonsai = _require_mapping(value["bonsai"], "AXON bonsai health")
+    _require_exact_keys(bonsai, {"healthy", "required"}, "AXON bonsai health")
+    if not isinstance(bonsai["healthy"], bool) or bonsai["required"] is not False:
+        raise MalformedResponse("AXON bonsai health is invalid", {})
     if not isinstance(value["execution_available"], bool):
         raise MalformedResponse("AXON execution availability is invalid", {})
-    return dict(value)
+    if value["bonsai_required"] is not False:
+        raise MalformedResponse("AXON bonsai_required must be false", {})
+    if value["status"] == "healthy":
+        if value["degraded_reason"] is not None:
+            raise MalformedResponse("AXON degraded_reason must be null when healthy", {})
+    elif not isinstance(value["degraded_reason"], str) or not value["degraded_reason"]:
+        raise MalformedResponse("AXON degraded_reason must explain a non-healthy status", {})
+    if "inference_backend" in value and value["inference_backend"] != inference["provider"]:
+        raise MalformedResponse("AXON inference_backend alias does not match inference.provider", {})
+    if "status_reason" in value and (not isinstance(value["status_reason"], str) or not value["status_reason"]):
+        raise MalformedResponse("AXON status_reason is invalid", {})
+    return {
+        "status": value["status"],
+        "version": value["version"],
+        "inference": {
+            "authority": "iar",
+            "provider": inference["provider"],
+            "model": inference["model"],
+            "healthy": inference["healthy"],
+        },
+        "governance_reachable": services["governance"],
+        "degraded_reason": value["degraded_reason"],
+    }
 
 
 def validate_axon_tools(payload: Mapping[str, Any]) -> dict[str, Any]:

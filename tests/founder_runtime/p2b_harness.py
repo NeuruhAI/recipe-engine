@@ -300,9 +300,19 @@ def _count_toggle(before: int, after: int):
 
 
 def axon_identity_body() -> dict:
-    return {"status": "healthy", "version": "2.4.0-p1.1",
-            "inference": {"authority": "iar", "provider": "ollama-bonsai", "model": "bonsai", "health": True},
-            "execution_available": True, "degraded_reason": None}
+    # Mirror of the REAL promoted gateway (f3a94d1a, v2.4.0-p1.1) GET /health
+    # aggregation, captured live 2026-07-22 (p2b-axon-final-gate-contract).
+    return {
+        "status": "healthy", "version": "2.4.0-p1.1", "uptime": 38072,
+        "services": {"coordinator": True, "toolRegistry": True, "governance": True,
+                     "governedExecutor": True, "bonsai": False, "ollama": True, "iar": True},
+        "inference": {"authority": "iar", "provider": "ollama-llama3.2",
+                      "model": "llama3.2", "healthy": True},
+        "bonsai": {"healthy": False, "required": False},
+        "execution_available": True, "bonsai_required": False, "degraded_reason": None,
+        "inference_backend": "ollama-llama3.2",
+        "status_reason": "iar=ollama-llama3.2(llama3.2); governance=ok; governed_executor=ok; execution=ok",
+    }
 
 
 def axon_governed_read_body(path: str = "README.md") -> dict:
