@@ -501,9 +501,14 @@ class PureResponseValidatorTests(unittest.TestCase):
         decision = {
             "action_id": "a", "decision": "escalate", "risk_score": 0.8,
             "thresholds": {}, "reasons": [], "required_next_steps": [], "audit_id": "id",
+            "policy_id": "default", "policy_version": SHA,
             "action": {"action_id": "a"}, "created_at": "t",
         }
         self.assertEqual(validate_governance_decision(decision)["decision"], "escalate")
+        with self.assertRaises(MalformedResponse):
+            validate_governance_decision({k: v for k, v in decision.items() if k != "policy_id"})
+        with self.assertRaises(MalformedResponse):
+            validate_governance_decision({k: v for k, v in decision.items() if k != "policy_version"})
         decision["action"]["policy"] = {}
         with self.assertRaises(UnsafeCapability):
             validate_governance_decision(decision)

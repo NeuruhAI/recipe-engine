@@ -325,9 +325,14 @@ def iar_provenance_body() -> dict:
         "ledger_sha256_prefix": "fae0db89abcdef", "genesis_continuity": True}}
 
 
+GOVERNANCE_POLICY_ID = "default"
+GOVERNANCE_POLICY_VERSION = "5544e5366abaa5d4d6dd9d9324a5aeb88ff8f51698fc7efa4628c13194d45c4c"
+
+
 def governance_decision_body(action: dict) -> dict:
     return {"action_id": action["action_id"], "decision": "allow", "risk_score": 0.1,
             "thresholds": {"block": 0.9}, "reasons": [], "required_next_steps": [],
+            "policy_id": GOVERNANCE_POLICY_ID, "policy_version": GOVERNANCE_POLICY_VERSION,
             "audit_id": "aud-1", "action": dict(action), "created_at": "2026-07-21T00:00:00Z"}
 
 

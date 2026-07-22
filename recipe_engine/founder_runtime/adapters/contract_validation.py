@@ -215,16 +215,28 @@ def validate_governance_health(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_governance_decision(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Exact-key validation for the promoted UP-2 Governance decision.
+
+    The UP-2 authority reference (``policy_id``/``policy_version``) is REQUIRED:
+    every promoted Governance decision carries the identity and content hash of
+    the ruleset that produced it.  Both are observed evidence only — they bind
+    the decision to its policy for receipts and audit, and are never converted
+    into execution authority.  Any other additional field still fails closed.
+    """
     value = _require_mapping(payload, "Governance decision")
     required = {
         "action_id", "decision", "risk_score", "thresholds", "reasons",
         "required_next_steps", "audit_id", "action", "created_at",
+        "policy_id", "policy_version",
     }
     _require_exact_keys(value, required, "Governance decision")
     if value["decision"] not in GOVERNANCE_DECISIONS:
         raise MalformedResponse("Governance decision vocabulary is invalid", {})
     if isinstance(value["risk_score"], bool) or not isinstance(value["risk_score"], (int, float)):
         raise MalformedResponse("Governance risk score is invalid", {})
+    if not isinstance(value["policy_id"], str) or not value["policy_id"].strip():
+        raise MalformedResponse("Governance policy_id must be a non-empty string", {})
+    _require_sha256(value["policy_version"], "Governance policy_version")
     action = _require_mapping(value["action"], "Governance echoed action")
     if "policy" in action:
         raise UnsafeCapability("caller policy override is forbidden", {})
