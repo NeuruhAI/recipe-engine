@@ -216,6 +216,8 @@ class AuthorityReferenceAxonBoundaryTests(unittest.TestCase):
                 ),
                 host_recovery_audit_base=str(base / "host"),
                 recipe_engine_sha="ead8a89",
+                iar_ledger_baseline_count=H.iar_fixture_ledger()["baseline_count"],
+                iar_ledger_baseline_sha256=H.iar_fixture_ledger()["baseline_sha256"],
             )
             result = run_live_readonly_canary(settings)
 

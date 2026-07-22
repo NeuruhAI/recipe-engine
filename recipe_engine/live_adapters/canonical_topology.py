@@ -35,6 +35,14 @@ CANONICAL_AXON_SHA = "f3a94d1a68ac6b07525e962692901411bd43e6bf"
 CANONICAL_AXON_VERSION = "2.4.0-p1.1"
 CANONICAL_GOVERNANCE_SHA = "8e03131b628ba611d038551a47741623c3a80f4b"
 CANONICAL_GOVERNANCE_SERVICE = "autonomous-governance-core"
+# Ratified IAR append-only ledger baseline anchor: the first 143 records of the
+# canonical ledger, FULL sha256 as sealed by iar-p2b-provenance-contract/
+# 20260721T200233Z.  Growth beyond the baseline is validated by chain
+# continuity, never by re-pinning the current total.
+CANONICAL_IAR_LEDGER_BASELINE_COUNT = 143
+CANONICAL_IAR_LEDGER_BASELINE_SHA256 = (
+    "fae0db894e7af106c265671953134fe76d707710e5be0cd9f8e7479fedaec660"
+)
 
 # The canonical eight-organ order (unchanged).
 CANONICAL_ORGAN_ORDER = ("github", "vault", "qdrant", "mother", "iar", "aegis", "governance", "axon_readonly")
@@ -127,6 +135,10 @@ def verify_canonical_topology(settings: LiveAdapterSettings) -> None:
         raise TopologyError("wrong AXON service SHA (expected promoted f3a94d1)")
     if settings.governance_source_sha != CANONICAL_GOVERNANCE_SHA:
         raise TopologyError("wrong Governance service SHA (expected promoted 8e03131b)")
+    if settings.iar_ledger_baseline_count != CANONICAL_IAR_LEDGER_BASELINE_COUNT:
+        raise TopologyError("wrong IAR ledger baseline count (expected ratified 143)")
+    if settings.iar_ledger_baseline_sha256 != CANONICAL_IAR_LEDGER_BASELINE_SHA256:
+        raise TopologyError("wrong IAR ledger baseline anchor (expected ratified fae0db89…)")
 
 
 def build_canonical_topology(
@@ -157,6 +169,8 @@ def build_canonical_topology(
         endpoints=endpoints,
         axon_source_sha=CANONICAL_AXON_SHA,
         governance_source_sha=CANONICAL_GOVERNANCE_SHA,
+        iar_ledger_baseline_count=CANONICAL_IAR_LEDGER_BASELINE_COUNT,
+        iar_ledger_baseline_sha256=CANONICAL_IAR_LEDGER_BASELINE_SHA256,
         host_recovery_audit_base=host_recovery_audit_base,
         recipe_engine_sha=recipe_engine_sha,
     )

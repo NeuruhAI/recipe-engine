@@ -6,6 +6,9 @@ process, environment, database, or network I/O.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -32,6 +35,29 @@ QDRANT_MANIFEST_SCHEMA = "neuruh.memory-source-manifest.v1"
 IAR_HEALTH_KEYS = frozenset(
     {"enabled", "active_backend", "active_model", "backends", "degraded_reason"}
 )
+# --- IAR append-only provenance ledger contract (P2-B re-ratification) ------
+# The ledger is the IAR service's single-writer, hash-chained JSONL file.  Its
+# ratified baseline (the first IAR_LEDGER_BASELINE_COUNT records) is anchored
+# by a FULL sha256; growth beyond the baseline is legitimate if and only if
+# every record chains from the literal GENESIS root and every post-baseline
+# record satisfies the reviewed local-only provider policy.  The CURRENT total
+# and head hash are observed evidence, never a hard-coded ceiling.
+IAR_LEDGER_GENESIS = "GENESIS"
+IAR_LEDGER_BASELINE_COUNT = 143
+IAR_LEDGER_BASELINE_SHA256 = "fae0db894e7af106c265671953134fe76d707710e5be0cd9f8e7479fedaec660"
+# One record per service `prov.write` call (iar_v2.py /route): exactly these keys.
+IAR_LEDGER_RECORD_KEYS = frozenset(
+    {
+        "backend", "decision_reason", "entry_hash", "est_cost_usd", "fallback_from",
+        "finish_reason", "input_sha", "kind", "latency_ms", "model", "output_sha",
+        "prev_hash", "request_id", "truncated", "ts",
+    }
+)
+# Local backend identities from the ratified IAR candidate 0f427703
+# (_default_backends, kind == "local").  claude-cloud is kind "cloud" and is
+# NEVER a permitted post-baseline ledger writer under the P2-B local-only mandate.
+IAR_LEDGER_LOCAL_BACKENDS = frozenset({"ollama-llama3.2", "bonsai-8b", "gemma-4-e4b"})
+IAR_LEDGER_MAX_BYTES = 64 * 1024 * 1024  # bounded-read sanity ceiling; larger fails closed
 AEGIS_VERDICTS = frozenset({"VALID", "CONTRADICTORY", "VALID_NO_CONTRACT"})
 GOVERNANCE_DECISIONS = frozenset({"allow", "escalate", "block"})
 AXON_CONTAINMENT_CODES = frozenset(
@@ -164,7 +190,22 @@ def validate_iar_health(payload: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value)
 
 
-def validate_iar_provenance(payload: Mapping[str, Any], binding: Mapping[str, Any]) -> dict[str, Any]:
+def validate_iar_provenance(
+    payload: Mapping[str, Any],
+    binding: Mapping[str, Any],
+    *,
+    baseline_count: int = IAR_LEDGER_BASELINE_COUNT,
+) -> dict[str, Any]:
+    """Wire-shape validation of GET /provenance (append-only re-ratification).
+
+    The ledger baseline is no longer a frozen total: the binding must report AT
+    LEAST ``baseline_count`` records and a well-formed 16-hex head-hash prefix.
+    The reported count/prefix are the service's head receipt — observed
+    evidence that the caller (LiveIARAdapter.verify_provenance) must cross-check
+    against its own independent full-chain validation of the ledger file
+    (validate_iar_ledger_continuity).  Neither value is ever a hard-coded
+    ceiling.
+    """
     value = _require_mapping(payload, "IAR provenance response")
     _require_exact_keys(value, {"provenance_intact"}, "IAR provenance response")
     if value["provenance_intact"] is not True:
@@ -175,13 +216,176 @@ def validate_iar_provenance(payload: Mapping[str, Any], binding: Mapping[str, An
         "ledger_sha256_prefix", "genesis_continuity",
     }
     _require_exact_keys(bound, required, "IAR external identity binding")
-    if bound["ledger_line_count"] != 143 or not str(bound["ledger_sha256_prefix"]).startswith("fae0db89"):
-        raise ProvenanceInvalid("IAR ledger baseline mismatch", {})
+    count = bound["ledger_line_count"]
+    if isinstance(count, bool) or not isinstance(count, int) or count < baseline_count:
+        raise ProvenanceInvalid(
+            "IAR ledger is below the ratified baseline",
+            {"reported": count, "baseline_count": baseline_count},
+        )
+    prefix = bound["ledger_sha256_prefix"]
+    if not isinstance(prefix, str) or not re.fullmatch(r"[0-9a-f]{16}", prefix):
+        raise ProvenanceInvalid("IAR ledger head-hash prefix is malformed", {})
     if bound["genesis_continuity"] is not True:
         raise ProvenanceInvalid("IAR ledger is not GENESIS-rooted", {})
     if not isinstance(bound["ledger_path"], str) or not bound["ledger_path"].startswith("/"):
         raise ProvenanceInvalid("IAR ledger binding is not absolute", {})
     return {"provenance_intact": True, "binding": dict(bound)}
+
+
+def validate_iar_ledger_continuity(
+    ledger_bytes: bytes,
+    *,
+    baseline_count: int,
+    baseline_sha256: str,
+) -> dict[str, Any]:
+    """Continuity-anchored append-only validation of the raw IAR ledger bytes.
+
+    Pure function (no I/O): the caller reads the file.  Fail-closed invariants:
+
+    - the ratified baseline (first ``baseline_count`` records) is byte-for-byte
+      anchored by the FULL ``baseline_sha256`` of its lines;
+    - every record from the literal GENESIS root through the current head has
+      valid deterministic hash linkage (the IAR service's own algorithm:
+      entry_hash = sha256(prev_hash + compact-sorted-json(record sans
+      entry_hash)));
+    - every record carries exactly the reviewed 15-key schema;
+    - every POST-baseline record satisfies the local-only provider policy
+      (kind local, allowlisted backend, zero cost, no OpenRouter reference);
+    - the current total and head hash are computed and RETURNED as observed
+      evidence — never compared against a hard-coded current value, so
+      legitimate local append-only growth keeps validating without code change.
+    """
+    if isinstance(baseline_count, bool) or not isinstance(baseline_count, int) or baseline_count < 1:
+        raise ProvenanceInvalid("IAR ledger baseline anchor count is not configured", {})
+    if not isinstance(baseline_sha256, str) or not SHA256_RE.fullmatch(baseline_sha256):
+        raise ProvenanceInvalid("IAR ledger baseline anchor hash is not configured", {})
+    if not isinstance(ledger_bytes, bytes) or not ledger_bytes:
+        raise ProvenanceInvalid("IAR ledger is empty or unreadable", {})
+    if len(ledger_bytes) > IAR_LEDGER_MAX_BYTES:
+        raise ProvenanceInvalid("IAR ledger exceeds the bounded-read ceiling", {"bytes": len(ledger_bytes)})
+    if b"\r" in ledger_bytes:
+        raise ProvenanceInvalid("IAR ledger contains carriage returns", {})
+    if not ledger_bytes.endswith(b"\n"):
+        raise ProvenanceInvalid("IAR ledger final record is truncated", {})
+    raw_lines = ledger_bytes.split(b"\n")
+    if raw_lines[-1] != b"":
+        raise ProvenanceInvalid("IAR ledger final record is truncated", {})
+    lines = raw_lines[:-1]
+    if any(not ln.strip() for ln in lines):
+        raise ProvenanceInvalid("IAR ledger contains blank lines", {})
+    count = len(lines)
+    if count < baseline_count:
+        raise ProvenanceInvalid(
+            "IAR ledger has fewer records than the ratified baseline",
+            {"records": count, "baseline_count": baseline_count},
+        )
+    baseline_blob = b"".join(ln + b"\n" for ln in lines[:baseline_count])
+    observed_baseline = hashlib.sha256(baseline_blob).hexdigest()
+    if observed_baseline != baseline_sha256:
+        raise ProvenanceInvalid(
+            "IAR ledger ratified baseline has been altered",
+            {"observed": observed_baseline[:16], "anchored": baseline_sha256[:16]},
+        )
+    prev = IAR_LEDGER_GENESIS
+    seen_request_ids: set[str] = set()
+    seen_entry_hashes: set[str] = set()
+    for index, raw in enumerate(lines, 1):
+        try:
+            record = json.loads(raw)
+        except ValueError as exc:
+            raise MalformedResponse("IAR ledger record is not valid JSON", {"record": index}) from exc
+        if not isinstance(record, dict):
+            raise MalformedResponse("IAR ledger record is not an object", {"record": index})
+        if set(record) != IAR_LEDGER_RECORD_KEYS:
+            raise ProvenanceInvalid(
+                "IAR ledger record has an invalid field set",
+                {"record": index, "unexpected": sorted(set(record) ^ IAR_LEDGER_RECORD_KEYS)},
+            )
+        entry_hash = record["entry_hash"]
+        if not isinstance(entry_hash, str) or not SHA256_RE.fullmatch(entry_hash):
+            raise ProvenanceInvalid("IAR ledger entry hash is malformed", {"record": index})
+        if record["prev_hash"] != prev:
+            raise ProvenanceInvalid(
+                "IAR ledger chain linkage is broken", {"record": index}
+            )
+        body = {k: v for k, v in record.items() if k != "entry_hash"}
+        preimage = record["prev_hash"] + json.dumps(body, sort_keys=True, separators=(",", ":"))
+        if hashlib.sha256(preimage.encode()).hexdigest() != entry_hash:
+            raise ProvenanceInvalid("IAR ledger entry hash is invalid", {"record": index})
+        if entry_hash in seen_entry_hashes:
+            raise ProvenanceInvalid("IAR ledger entry hash is replayed", {"record": index})
+        seen_entry_hashes.add(entry_hash)
+        request_id = record["request_id"]
+        if not isinstance(request_id, str) or not request_id:
+            raise MalformedResponse("IAR ledger request identity is malformed", {"record": index})
+        if request_id in seen_request_ids:
+            raise ProvenanceInvalid("IAR ledger request identity is replayed", {"record": index})
+        seen_request_ids.add(request_id)
+        ts = record["ts"]
+        if isinstance(ts, bool) or not isinstance(ts, (int, float)) or not math.isfinite(ts) or ts <= 0:
+            raise MalformedResponse("IAR ledger timestamp is malformed", {"record": index})
+        if index > baseline_count:
+            _require_iar_local_record(record, index)
+        prev = entry_hash
+    return {
+        "record_count": count,
+        "baseline_count": baseline_count,
+        "baseline_sha256": baseline_sha256,
+        "ledger_sha256": hashlib.sha256(ledger_bytes).hexdigest(),
+        "head_entry_hash": prev,
+    }
+
+
+def _require_iar_local_record(record: Mapping[str, Any], index: int) -> None:
+    """Reviewed local-only provider policy for every post-baseline record."""
+    if record["kind"] != "local":
+        raise ProvenanceInvalid(
+            "IAR ledger post-baseline record is not local",
+            {"record": index, "kind": record.get("kind")},
+        )
+    backend = record["backend"]
+    if not isinstance(backend, str) or backend not in IAR_LEDGER_LOCAL_BACKENDS:
+        raise ProvenanceInvalid(
+            "IAR ledger post-baseline backend is not an approved local backend",
+            {"record": index, "backend": backend if isinstance(backend, str) else type(backend).__name__},
+        )
+    model = record["model"]
+    if not isinstance(model, str) or not model:
+        raise MalformedResponse("IAR ledger post-baseline model identity is malformed", {"record": index})
+    reason = record["decision_reason"]
+    if not isinstance(reason, str) or not reason:
+        raise MalformedResponse("IAR ledger post-baseline decision reason is malformed", {"record": index})
+    for field in (backend, model, reason):
+        if "openrouter" in field.lower():
+            raise ProvenanceInvalid(
+                "IAR ledger post-baseline record references OpenRouter",
+                {"record": index},
+            )
+    cost = record["est_cost_usd"]
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost != 0:
+        raise ProvenanceInvalid(
+            "IAR ledger post-baseline record carries non-zero or malformed provider cost",
+            {"record": index},
+        )
+    latency = record["latency_ms"]
+    if isinstance(latency, bool) or not isinstance(latency, int) or latency < 0:
+        raise MalformedResponse("IAR ledger post-baseline latency evidence is malformed", {"record": index})
+    for key in ("input_sha", "output_sha"):
+        digest = record[key]
+        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+            raise MalformedResponse(
+                "IAR ledger post-baseline usage evidence is malformed",
+                {"record": index, "field": key},
+            )
+    if not isinstance(record["finish_reason"], str) or not record["finish_reason"]:
+        raise MalformedResponse("IAR ledger post-baseline finish reason is malformed", {"record": index})
+    if not isinstance(record["truncated"], bool):
+        raise MalformedResponse("IAR ledger post-baseline truncation flag is malformed", {"record": index})
+    fallback = record["fallback_from"]
+    if fallback is not None and (
+        not isinstance(fallback, list) or any(not isinstance(item, str) for item in fallback)
+    ):
+        raise MalformedResponse("IAR ledger post-baseline fallback evidence is malformed", {"record": index})
 
 
 def validate_aegis_world(payload: Mapping[str, Any]) -> dict[str, Any]:

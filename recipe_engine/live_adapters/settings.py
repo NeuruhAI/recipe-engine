@@ -85,6 +85,11 @@ class LiveAdapterSettings:
     axon_source_sha: str = ""          # expected AXON ratified read-only main SHA
     governance_source_sha: str = ""    # expected Governance promoted main SHA
     recipe_engine_sha: str = ""        # this adapter package's owning source sha
+    # Ratified IAR ledger baseline anchor: count + FULL sha256 of the first
+    # `count` ledger lines.  Unset (0/"") fails closed in the live adapter —
+    # live provenance verification REQUIRES a reviewed anchor.
+    iar_ledger_baseline_count: int = 0
+    iar_ledger_baseline_sha256: str = ""
     allow_live: bool = True
 
     def repo_root(self, repo_id: str) -> RepoRoot:

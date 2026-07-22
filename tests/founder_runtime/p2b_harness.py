@@ -90,12 +90,15 @@ def http_client(*endpoints: LiveEndpoint) -> LoopbackHttpClient:
 
 def settings_with(*, endpoints: tuple[LiveEndpoint, ...] = (), repo_roots: tuple[RepoRoot, ...] = (),
                   host_recovery_audit_root: str | None = None, **kw: Any) -> LiveAdapterSettings:
+    led = iar_fixture_ledger()
     return LiveAdapterSettings(
         repo_roots=repo_roots, endpoints=endpoints,
         host_recovery_audit_root=host_recovery_audit_root,
         recipe_engine_sha=kw.pop("recipe_engine_sha", "test-sha"),
         axon_source_sha=kw.pop("axon_source_sha", ""),
         governance_source_sha=kw.pop("governance_source_sha", ""),
+        iar_ledger_baseline_count=kw.pop("iar_ledger_baseline_count", led["baseline_count"]),
+        iar_ledger_baseline_sha256=kw.pop("iar_ledger_baseline_sha256", led["baseline_sha256"]),
         **kw,
     )
 
@@ -328,11 +331,76 @@ def iar_health_body() -> dict:
             "budget_policy": {"cap_usd": 0}, "config_provenance": "live"}
 
 
+# --------------------------------------------------------- synthetic ledger
+# A real chain-valid IAR ledger file (the service's exact append algorithm) so
+# LiveIARAdapter's independent continuity validation has genuine bytes to read.
+IAR_FIXTURE_BASELINE_COUNT = 143
+
+
+def iar_ledger_record(prev_hash: str, index: int, *, backend: str = "bonsai-8b",
+                      model: str = "bonsai-8b", kind: str = "local",
+                      est_cost_usd: float = 0.0, request_id: str | None = None,
+                      **overrides: Any) -> dict:
+    """One ledger record via the service algorithm (iar_v2.py Provenance.write)."""
+    from recipe_engine.founder_runtime.ids import digest
+
+    payload = {
+        "request_id": request_id or f"req-{index:05d}", "decision_reason": "privacy->local",
+        "backend": backend, "model": model, "kind": kind, "fallback_from": None,
+        "input_sha": digest(f"in-{index}"), "output_sha": digest(f"out-{index}"),
+        "latency_ms": 5, "est_cost_usd": est_cost_usd,
+        "finish_reason": "stop", "truncated": False,
+    }
+    payload.update({k: v for k, v in overrides.items() if k not in ("prev_hash", "ts", "entry_hash")})
+    record = {**payload, "prev_hash": prev_hash, "ts": 1784000000.0 + index}
+    body = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    record["entry_hash"] = hashlib.sha256((prev_hash + body).encode()).hexdigest()
+    return record
+
+
+def build_iar_ledger(count: int, path: Path, *, post_baseline_backend: str = "ollama-llama3.2",
+                     baseline_count: int = IAR_FIXTURE_BASELINE_COUNT) -> dict:
+    """Write a chain-valid ledger of ``count`` records; return its anchors."""
+    prev = "GENESIS"
+    lines = []
+    for index in range(1, count + 1):
+        backend = "bonsai-8b" if index <= baseline_count else post_baseline_backend
+        model = backend if backend != "ollama-llama3.2" else "llama3.2:3b"
+        record = iar_ledger_record(prev, index, backend=backend, model=model)
+        prev = record["entry_hash"]
+        lines.append(json.dumps(record, sort_keys=True))
+    blob = "".join(line + "\n" for line in lines).encode()
+    path.write_bytes(blob)
+    anchored = min(baseline_count, count)
+    baseline_blob = "".join(line + "\n" for line in lines[:anchored]).encode()
+    return {
+        "path": path, "count": count, "head_entry_hash": prev,
+        "ledger_sha256": hashlib.sha256(blob).hexdigest(),
+        "baseline_count": anchored,
+        "baseline_sha256": hashlib.sha256(baseline_blob).hexdigest(),
+        "lines": lines,
+    }
+
+
+_IAR_FIXTURE_LEDGER: dict | None = None
+
+
+def iar_fixture_ledger() -> dict:
+    """Process-wide synthetic ledger (exactly the baseline count of records)."""
+    global _IAR_FIXTURE_LEDGER
+    if _IAR_FIXTURE_LEDGER is None:
+        import tempfile
+        root = Path(tempfile.mkdtemp(prefix="iar-ledger-fixture-"))
+        _IAR_FIXTURE_LEDGER = build_iar_ledger(IAR_FIXTURE_BASELINE_COUNT, root / "iar.jsonl")
+    return _IAR_FIXTURE_LEDGER
+
+
 def iar_provenance_body() -> dict:
+    led = iar_fixture_ledger()
     return {"provenance_intact": True, "binding": {
         "pid": 4242, "command": "iar", "cwd": "/x", "repo_sha": "abc123",
-        "ledger_path": "/abs/ledger.jsonl", "ledger_line_count": 143,
-        "ledger_sha256_prefix": "fae0db89abcdef", "genesis_continuity": True}}
+        "ledger_path": str(led["path"]), "ledger_line_count": led["count"],
+        "ledger_sha256_prefix": led["ledger_sha256"][:16], "genesis_continuity": True}}
 
 
 GOVERNANCE_POLICY_ID = "default"

@@ -13,13 +13,15 @@ import time
 from typing import Any, Mapping
 
 from recipe_engine.founder_runtime.adapters.contract_validation import (
+    IAR_LEDGER_MAX_BYTES,
     validate_iar_health,
+    validate_iar_ledger_continuity,
     validate_iar_provenance,
 )
 from recipe_engine.founder_runtime.adapters.envelope import AdapterResult, AdapterResultStatus
 from recipe_engine.founder_runtime.adapters.identity import EvidenceClass
 from recipe_engine.founder_runtime.adapters.protocols import AdapterRequestMeta
-from recipe_engine.founder_runtime.errors import UnsafeCapability
+from recipe_engine.founder_runtime.errors import ProvenanceInvalid, UnsafeCapability
 from recipe_engine.founder_runtime.ids import hash_payload
 from recipe_engine.live_adapters.base_live import LiveAdapterBase, reject_mutation_shaped
 from recipe_engine.live_adapters.settings import LiveAdapterSettings
@@ -108,13 +110,25 @@ class LiveIARAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(None, context="iar.verify_provenance")
+            anchor_count = self.settings.iar_ledger_baseline_count
+            anchor_sha256 = self.settings.iar_ledger_baseline_sha256
+            if not anchor_count or not anchor_sha256:
+                raise ProvenanceInvalid("IAR ledger baseline anchor is not configured", {})
             timeout = (meta.timeout_ms if meta and meta.timeout_ms else 6_000)
             body = self._get("/provenance", timeout)
             if not isinstance(body, Mapping):
                 raise TransportMalformed("iar provenance is not an object")
             prov_view = {"provenance_intact": body.get("provenance_intact")}
             binding = body.get("binding")
-            validated = validate_iar_provenance(prov_view, binding if isinstance(binding, Mapping) else {})
+            validated = validate_iar_provenance(
+                prov_view,
+                binding if isinstance(binding, Mapping) else {},
+                baseline_count=anchor_count,
+            )
+            continuity = self._verify_ledger_continuity(
+                validated["binding"], anchor_count=anchor_count, anchor_sha256=anchor_sha256
+            )
+            validated = {**validated, "continuity": continuity}
         except Exception as exc:  # noqa: BLE001
             return self.failure_result(operation=_OP_PROV, meta=meta, exc=exc, duration_ms=_ms(t0))
         observed_sha = hash_payload(validated)
@@ -137,9 +151,47 @@ class LiveIARAdapter(LiveAdapterBase):
             dependency_identity=dep,
             provenance=prov,
             observed_sha=observed_sha,
-            evidence_refs=[f"iar:ledger:{validated['binding']['ledger_line_count']}"],
+            evidence_refs=[
+                f"iar:ledger:{validated['binding']['ledger_line_count']}",
+                f"iar:ledger_baseline:{validated['continuity']['baseline_count']}:"
+                f"{validated['continuity']['baseline_sha256'][:16]}",
+                f"iar:ledger_head:{validated['continuity']['head_entry_hash'][:16]}",
+            ],
             duration_ms=_ms(t0),
         )
+
+    def _verify_ledger_continuity(
+        self, binding: Mapping[str, Any], *, anchor_count: int, anchor_sha256: str
+    ) -> dict[str, Any]:
+        """Independent full-chain validation of the ledger the binding reports.
+
+        Read-only bounded file read; the service-reported head receipt
+        (line count + hash prefix) must match this adapter's OWN computation
+        over the same file, so the service cannot describe one ledger while a
+        different one exists on disk.
+        """
+        path = binding["ledger_path"]
+        try:
+            with open(path, "rb") as fh:
+                ledger_bytes = fh.read(IAR_LEDGER_MAX_BYTES + 1)
+        except OSError as exc:
+            raise ProvenanceInvalid(
+                "IAR ledger is not readable at the bound path", {"path": str(path)}
+            ) from exc
+        continuity = validate_iar_ledger_continuity(
+            ledger_bytes, baseline_count=anchor_count, baseline_sha256=anchor_sha256
+        )
+        if binding["ledger_line_count"] != continuity["record_count"]:
+            raise ProvenanceInvalid(
+                "IAR ledger head receipt mismatch (record count)",
+                {"reported": binding["ledger_line_count"], "observed": continuity["record_count"]},
+            )
+        if binding["ledger_sha256_prefix"] != continuity["ledger_sha256"][:16]:
+            raise ProvenanceInvalid(
+                "IAR ledger head receipt mismatch (ledger hash)",
+                {"reported": binding["ledger_sha256_prefix"]},
+            )
+        return continuity
 
     # Inference is gated in P2-B — never spends OpenRouter credits.
     def interpret(self, request_text: str, *, principal_id: str = "jeramie", meta: AdapterRequestMeta | None = None) -> dict[str, Any]:

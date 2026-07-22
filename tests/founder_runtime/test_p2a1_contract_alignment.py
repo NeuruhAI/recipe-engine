@@ -492,9 +492,15 @@ class PureResponseValidatorTests(unittest.TestCase):
         binding = {
             "pid": 1, "command": "iar", "cwd": "/repo", "repo_sha": "c" * 40,
             "ledger_path": "/repo/ledger.jsonl", "ledger_line_count": 143,
-            "ledger_sha256_prefix": "fae0db89", "genesis_continuity": True,
+            "ledger_sha256_prefix": "fae0db894e7af106", "genesis_continuity": True,
         }
         self.assertTrue(validate_iar_provenance({"provenance_intact": True}, binding)["provenance_intact"])
+        # append-only re-ratification: growth beyond the baseline stays valid …
+        grown = {**binding, "ledger_line_count": 161, "ledger_sha256_prefix": "a44d304e808e3f21"}
+        self.assertTrue(validate_iar_provenance({"provenance_intact": True}, grown)["provenance_intact"])
+        # … while truncation below it fails closed.
+        with self.assertRaises(ProvenanceInvalid):
+            validate_iar_provenance({"provenance_intact": True}, {**binding, "ledger_line_count": 142})
 
     def test_governance_contracts(self):
         self.assertTrue(validate_governance_health({"ok": True, "service": "autonomous-governance-core"})["ok"])
