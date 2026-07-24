@@ -28,6 +28,20 @@ ALLOWED_PATH_IO = {
     "recipe_engine.founder_runtime.persistence.sqlite": {"mkdir"},  # fixture DB parent only
 }
 
+# Founder Runtime API v1 (feat/founder-runtime-api-v1): the API is the operator-facing
+# NETWORK BOUNDARY of the runtime. Its serving/client modules legitimately perform
+# loopback HTTP and read an operator-supplied token file / write the OpenAPI spec.
+# The mission KERNEL (service.py, persistence, runtime, autonomy) remains free of
+# network I/O and is unchanged; these flags never reach the kernel.
+API_BOUNDARY_ALLOWED_IMPORTS = {
+    "recipe_engine.founder_runtime.api.client": {"urllib.request", "urllib.error"},  # loopback operator client
+    "recipe_engine.founder_runtime.api.serve": {"urllib.request"},  # injected loopback organ prober
+}
+API_BOUNDARY_ALLOWED_PATH_IO = {
+    "recipe_engine.founder_runtime.api.auth": {"read_text"},  # operator token file (FR_API_OPERATOR_TOKEN_FILE)
+    "recipe_engine.founder_runtime.api.openapi": {"write_text"},  # emit machine-readable OpenAPI contract
+}
+
 
 def _module(path: Path) -> str:
     rel = path.relative_to(ROOT).with_suffix("")
@@ -102,7 +116,14 @@ class SecurityTests(unittest.TestCase):
         self.assertTrue(any(name.startswith("recipe_engine.autonomy") for name in reached))
         violations = []
         for name in sorted(reached):
-            violations.extend(f"{name}:{v}" for v in scan_source(name, modules[name].read_text()))
+            allowed_imports = API_BOUNDARY_ALLOWED_IMPORTS.get(name, set())
+            allowed_io = ALLOWED_PATH_IO.get(name, set()) | API_BOUNDARY_ALLOWED_PATH_IO.get(name, set())
+            for v in scan_source(name, modules[name].read_text()):
+                if v.startswith("import:") and v.split(":", 1)[1] in allowed_imports:
+                    continue
+                if v.startswith("path-io:") and v.split(":", 1)[1] in allowed_io:
+                    continue
+                violations.append(f"{name}:{v}")
         self.assertEqual(violations, [])
 
     def test_moved_aliased_helper_is_detected(self):

@@ -1,0 +1,145 @@
+"""Typed local client for the Founder Runtime API.
+
+Loopback only. The operator token is passed in (never logged or persisted by
+this client). Each state-changing call sends a fresh idempotency key unless the
+caller supplies one (for deliberate replay).
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.request
+import urllib.error
+import uuid
+from typing import Any, Iterator
+
+
+class ApiClientError(Exception):
+    def __init__(self, status: int, payload: Any):
+        self.status = status
+        self.payload = payload
+        super().__init__(f"HTTP {status}: {payload}")
+
+
+class FounderRuntimeClient:
+    def __init__(self, token: str, *, host: str = "127.0.0.1", port: int = 19090, timeout: float = 15.0):
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            raise ValueError("client is loopback-only")
+        self._base = f"http://{host}:{port}"
+        self._token = token
+        self._timeout = timeout
+
+    def _req(self, method: str, path: str, body: dict | None = None,
+             idempotency_key: str | None = None, expected_version: int | None = None,
+             auth: bool = True) -> Any:
+        url = self._base + path
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Content-Type", "application/json")
+        if auth:
+            req.add_header("Authorization", f"Bearer {self._token}")
+        if idempotency_key:
+            req.add_header("Idempotency-Key", idempotency_key)
+        if expected_version is not None:
+            req.add_header("X-Expected-Version", str(expected_version))
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = raw
+            raise ApiClientError(e.code, payload) from e
+
+    @staticmethod
+    def _key() -> str:
+        return str(uuid.uuid4())
+
+    # reads
+    def health(self) -> dict:
+        return self._req("GET", "/v1/health", auth=False)
+
+    def readiness(self) -> dict:
+        return self._req("GET", "/v1/readiness", auth=False)
+
+    def adapters_status(self) -> dict:
+        return self._req("GET", "/v1/adapters/status")
+
+    def list_missions(self) -> dict:
+        return self._req("GET", "/v1/missions")
+
+    def get_mission(self, mission_id: str) -> dict:
+        return self._req("GET", f"/v1/missions/{mission_id}")
+
+    def decision_packet(self, mission_id: str) -> dict:
+        return self._req("GET", f"/v1/missions/{mission_id}/decision-packet")
+
+    def proposed_plan(self, mission_id: str) -> dict:
+        return self._req("GET", f"/v1/missions/{mission_id}/plan")
+
+    def events(self, mission_id: str) -> dict:
+        return self._req("GET", f"/v1/missions/{mission_id}/events")
+
+    def receipts(self, mission_id: str) -> dict:
+        return self._req("GET", f"/v1/missions/{mission_id}/receipts")
+
+    def replay(self, mission_id: str) -> dict:
+        return self._req("GET", f"/v1/missions/{mission_id}/replay")
+
+    # writes
+    def create_mission(self, objective: str, *, title: str = "", done_criteria: str = "",
+                       idempotency_key: str | None = None) -> dict:
+        return self._req("POST", "/v1/missions",
+                         body={"objective": objective, "title": title, "done_criteria": done_criteria},
+                         idempotency_key=idempotency_key or self._key())
+
+    def approve(self, mission_id: str, *, reason: str = "", idempotency_key: str | None = None,
+                expected_version: int | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/approve", body={"reason": reason},
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+
+    def reject(self, mission_id: str, *, reason: str, idempotency_key: str | None = None,
+               expected_version: int | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/reject", body={"reason": reason},
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+
+    def pause(self, mission_id: str, *, idempotency_key: str | None = None,
+              expected_version: int | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/pause",
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+
+    def resume(self, mission_id: str, *, idempotency_key: str | None = None,
+               expected_version: int | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/resume",
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+
+    def cancel(self, mission_id: str, *, idempotency_key: str | None = None,
+               expected_version: int | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/cancel",
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+
+    def recover(self, mission_id: str, *, idempotency_key: str | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/recover",
+                         idempotency_key=idempotency_key or self._key())
+
+    def stream_events(self, mission_id: str) -> Iterator[dict]:
+        """Yield parsed SSE events from the read-only stream endpoint."""
+        url = f"{self._base}/v1/missions/{mission_id}/events/stream"
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("Authorization", f"Bearer {self._token}")
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            data_lines: list[str] = []
+            for raw in resp:
+                line = raw.decode("utf-8").rstrip("\n")
+                if line.startswith("data:"):
+                    data_lines.append(line[len("data:"):].strip())
+                elif line == "":
+                    if data_lines:
+                        try:
+                            yield json.loads("\n".join(data_lines))
+                        except json.JSONDecodeError:
+                            pass
+                        data_lines = []
