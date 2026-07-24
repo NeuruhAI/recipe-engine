@@ -900,7 +900,9 @@ class SqliteStore:
         )
 
     def verify_integrity(self) -> dict[str, Any]:
-        """Validate event hashes and that stored projection matches event rebuild."""
+        """Full-store verification: every event hash recomputed from canonical
+        stored material, column-vs-body hash agreement, chain linkage, order,
+        and projection rebuild. Any tamper mode fails (ok=False)."""
         from recipe_engine.founder_runtime.events.projector import (
             rebuild_mission_from_events,
             projection_hash,
@@ -908,15 +910,19 @@ class SqliteStore:
         c = self._c()
         issues: list[str] = []
         events_all = c.execute(
-            "SELECT mission_id, body_json, event_hash FROM mission_events ORDER BY sequence ASC"
+            "SELECT mission_id, body_json, event_hash, sequence FROM mission_events ORDER BY sequence ASC"
         ).fetchall()
         by_mission: dict[str, list] = {}
         for e in events_all:
             mid = e["mission_id"]
             by_mission.setdefault(mid, []).append(e)
             body = json.loads(e["body_json"])
-            from recipe_engine.founder_runtime.contracts.events import MissionEvent
             ev = MissionEvent.from_dict(body)
+            # stored event_hash column must agree with the stored body
+            if body.get("event_hash") != e["event_hash"]:
+                issues.append(f"event_hash_column_stomp:{ev.event_id}")
+                continue
+            # recomputed hash from canonical material must match stored hash
             if not ev.verify_hash():
                 issues.append(f"event_hash_mismatch:{ev.event_id}")
 
@@ -926,20 +932,18 @@ class SqliteStore:
         for mrow in missions:
             mid = mrow["mission_id"]
             stored = Mission.from_dict(json.loads(mrow["body_json"]))
-            # self-hash of stored body vs column
             body_hash = hash_payload(stored.to_dict())
             if body_hash != mrow["projection_hash"]:
                 issues.append(f"projection_hash_mismatch:{mid}")
-            # rebuild from events must match stored body
+            chain = self.verify_mission_chain(mid)
+            if not chain["ok"]:
+                issues.extend(chain["issues"])
             ev_rows = by_mission.get(mid) or []
             if not ev_rows:
                 issues.append(f"no_events:{mid}")
                 continue
             try:
-                evs = []
-                for er in ev_rows:
-                    from recipe_engine.founder_runtime.contracts.events import MissionEvent
-                    evs.append(MissionEvent.from_dict(json.loads(er["body_json"])))
+                evs = [MissionEvent.from_dict(json.loads(er["body_json"])) for er in ev_rows]
                 rebuilt = rebuild_mission_from_events(evs)
                 if projection_hash(rebuilt) != body_hash:
                     issues.append(f"rebuild_divergence:{mid}")
@@ -949,12 +953,92 @@ class SqliteStore:
                     issues.append(f"version_divergence:{mid}")
             except Exception as ex:
                 issues.append(f"rebuild_error:{mid}:{type(ex).__name__}")
+        # orphan events spliced onto a missing/foreign mission identity
+        mission_ids = {m["mission_id"] for m in missions}
+        for mid in by_mission:
+            if mid not in mission_ids:
+                issues.append(f"orphan_events:{mid}")
         return {
             "ok": len(issues) == 0,
             "schema_version": self.schema_version(),
             "issues": issues,
             "mission_count": len(missions),
             "event_count": len(events_all),
+        }
+
+    def verify_mission_chain(self, mission_id: str) -> dict[str, Any]:
+        """Fail-closed verification of one mission's event chain.
+
+        Recomputes every event hash from canonical stored material and checks
+        stored-vs-column hash agreement, genesis link, previous-hash linkage,
+        strict sequence/chain-position contiguity (no gaps, no duplicates, no
+        reorder), mission identity, and event-version consistency. Returns a
+        dict with ok/issues; never mutates the store.
+        """
+        from recipe_engine.founder_runtime.contracts.events import GENESIS_EVENT_HASH
+
+        c = self._c()
+        issues: list[str] = []
+        mrow = c.execute(
+            "SELECT version, current_state FROM missions WHERE mission_id=?", (mission_id,)
+        ).fetchone()
+        if mrow is None:
+            return {"ok": False, "issues": [f"mission_missing:{mission_id}"],
+                    "mission_id": mission_id, "event_count": 0, "tail_sequence": None}
+        rows = c.execute(
+            "SELECT sequence, event_id, mission_id, chain_position, previous_event_hash,"
+            " event_hash, body_json, timestamp FROM mission_events WHERE mission_id=?"
+            " ORDER BY sequence ASC",
+            (mission_id,),
+        ).fetchall()
+        if not rows:
+            return {"ok": False, "issues": [f"event_chain_empty:{mission_id}"],
+                    "mission_id": mission_id, "event_count": 0, "tail_sequence": None}
+        prev_hash = GENESIS_EVENT_HASH
+        prev_sequence: int | None = None
+        seen_positions: set[int] = set()
+        for expected_position, r in enumerate(rows):
+            body = json.loads(r["body_json"])
+            ev = MissionEvent.from_dict(body)
+            # column-vs-body agreement for immutable metadata used by the hash
+            if body.get("event_hash") != r["event_hash"]:
+                issues.append(f"event_hash_column_stomp:{ev.event_id}")
+                continue
+            if body.get("previous_event_hash") != r["previous_event_hash"]:
+                issues.append(f"previous_hash_column_stomp:{ev.event_id}")
+            if int(body.get("chain_position", -1)) != r["chain_position"]:
+                issues.append(f"chain_position_column_stomp:{ev.event_id}")
+            if body.get("timestamp") != r["timestamp"]:
+                issues.append(f"timestamp_column_stomp:{ev.event_id}")
+            # recomputed hash from canonical stored material
+            if not ev.verify_hash():
+                issues.append(f"event_hash_mismatch:{ev.event_id}")
+            # mission identity binding
+            if ev.mission_id != mission_id or ev.correlation_id != mission_id:
+                issues.append(f"cross_mission_splice:{ev.event_id}")
+            # previous-event link
+            if ev.previous_event_hash != prev_hash:
+                issues.append(f"previous_hash_tamper:{ev.event_id}")
+            # strict contiguous chain position (detects deletion/insertion/reorder/dup)
+            if ev.chain_position != expected_position:
+                issues.append(f"chain_position_gap:{ev.event_id}")
+            if ev.chain_position in seen_positions:
+                issues.append(f"duplicate_chain_position:{ev.event_id}")
+            seen_positions.add(int(ev.chain_position))
+            # strict sequence contiguity
+            if prev_sequence is not None and int(r["sequence"]) != prev_sequence + 1:
+                issues.append(f"sequence_gap:{ev.event_id}")
+            prev_sequence = int(r["sequence"])
+            prev_hash = ev.event_hash
+        # tail event count must match the mission's recorded version (truncated tail)
+        if int(mrow["version"]) != len(rows):
+            issues.append(f"tail_version_mismatch:{mission_id}")
+        return {
+            "ok": len(issues) == 0,
+            "issues": issues,
+            "mission_id": mission_id,
+            "event_count": len(rows),
+            "tail_sequence": prev_sequence,
         }
 
     def rebuild_projection_from_events(self, mission_id: str) -> Mission:

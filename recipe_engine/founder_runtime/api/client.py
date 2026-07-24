@@ -121,25 +121,60 @@ class FounderRuntimeClient:
         return self._req("POST", f"/v1/missions/{mission_id}/cancel",
                          idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
 
-    def recover(self, mission_id: str, *, idempotency_key: str | None = None) -> dict:
+    def recover(self, mission_id: str, *, idempotency_key: str | None = None,
+                expected_version: int | None = None) -> dict:
         return self._req("POST", f"/v1/missions/{mission_id}/recover",
-                         idempotency_key=idempotency_key or self._key())
+                         idempotency_key=idempotency_key or self._key(),
+                         expected_version=expected_version)
 
-    def stream_events(self, mission_id: str) -> Iterator[dict]:
-        """Yield parsed SSE events from the read-only stream endpoint."""
+    def stream_events(self, mission_id: str, *, after: int | str | None = None,
+                      last_event_id: str | None = None) -> Iterator[dict]:
+        """Yield parsed SSE events from the read-only stream endpoint.
+
+        Resumes strictly after `after`/`last_event_id` when given (durable
+        cursor). Already-seen event ids are never yielded twice (client-side
+        deduplication on top of server-side cursor enforcement)."""
         url = f"{self._base}/v1/missions/{mission_id}/events/stream"
+        if after is not None:
+            url += f"?after={after}"
         req = urllib.request.Request(url, method="GET")
         req.add_header("Authorization", f"Bearer {self._token}")
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+        if last_event_id:
+            req.add_header("Last-Event-ID", str(last_event_id))
+        seen: set[str] = set()
+        try:
+            resp_ctx = urllib.request.urlopen(req, timeout=self._timeout)
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = raw
+            raise ApiClientError(e.code, payload) from e
+        with resp_ctx as resp:
             data_lines: list[str] = []
+            current_id: str | None = None
+            current_type: str = ""
             for raw in resp:
                 line = raw.decode("utf-8").rstrip("\n")
-                if line.startswith("data:"):
+                if line.startswith("id:"):
+                    current_id = line[len("id:"):].strip()
+                elif line.startswith("event:"):
+                    current_type = line[len("event:"):].strip()
+                elif line.startswith("data:"):
                     data_lines.append(line[len("data:"):].strip())
                 elif line == "":
                     if data_lines:
                         try:
-                            yield json.loads("\n".join(data_lines))
+                            payload = json.loads("\n".join(data_lines))
                         except json.JSONDecodeError:
-                            pass
+                            payload = None
+                        if payload is not None:
+                            dedup_key = (f"{current_type}:{current_id}" if current_id is not None
+                                         else json.dumps(payload, sort_keys=True))
+                            if dedup_key not in seen:
+                                seen.add(dedup_key)
+                                yield payload
                         data_lines = []
+                        current_id = None
+                        current_type = ""

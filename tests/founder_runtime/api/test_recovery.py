@@ -33,7 +33,7 @@ def test_recovery_deterministic_and_safe(tmp_path):
     db = str(tmp_path / "m.sqlite")
     svc, res = _make(db)
     mid = res["envelope"]["mission_id"]
-    svc.pause(mid, idempotency_key="pk")
+    svc.pause(mid, idempotency_key="pk", expected_version=res["envelope"]["version"])
     svc.close()
     svc2 = MissionService(db)
     rec = svc2.recover(mid)

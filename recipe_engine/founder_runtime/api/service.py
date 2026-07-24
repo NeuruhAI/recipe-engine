@@ -50,6 +50,7 @@ _ALLOWED_NEXT = {
     "PLANNING": ["get", "pause", "cancel"],
     "AWAITING_DECISION": ["get", "decision_packet", "pause", "cancel"],
     "AWAITING_APPROVAL": ["get", "decision_packet", "plan", "approve", "reject", "pause", "cancel"],
+    "APPROVED_NO_EXECUTION": ["get", "decision_packet", "plan", "pause", "cancel"],
     "QUEUED": ["get", "pause", "cancel"],
     "EXECUTING": ["get", "pause", "cancel"],
     "VERIFYING": ["get", "pause", "cancel"],
@@ -131,9 +132,12 @@ class MissionService:
         authority = {
             "requirements": [a.to_dict() for a in mission.authority_requirements],
             "latest_approval": latest_approval,
+            "state": self._authority_state(mission, approvals),
             "mutation_authorized": False,
             "external_action_authorized": False,
             "production_persistence_authorized": False,
+            "executed": False,
+            "execution_enabled": False,
         }
         receipts = self.runtime.store.list_receipts(mission.mission_id)
         rid = receipt_id or (receipts[-1].receipt_id if receipts else None) or stable_id(
@@ -164,6 +168,35 @@ class MissionService:
             raise ApiError(409, "VERSION_CONFLICT",
                            "stale version; reload the mission and retry",
                            {"expected": expected_version, "actual": mission.version})
+
+    def _require_expected_version(self, expected_version: int | None) -> int:
+        """X-Expected-Version is mandatory on every mission/authority mutation."""
+        if expected_version is None:
+            raise ApiError(428, "EXPECTED_VERSION_REQUIRED",
+                           "X-Expected-Version header is required for state-changing calls",
+                           {})
+        return expected_version
+
+    @staticmethod
+    def _authority_state(mission: Mission, approvals: list) -> str:
+        """Explicit authority truth: PENDING until a terminal ALLOW/DENY exists."""
+        for a in reversed(approvals):
+            if a.decision == ApprovalDecision.ALLOW:
+                return "APPROVED"
+            if a.decision == ApprovalDecision.DENY:
+                return "REJECTED"
+        return "PENDING"
+
+    def _assert_not_corrupted(self, mission_id: str) -> None:
+        """Fail closed if the mission's event chain fails integrity verification."""
+        verdict = self.runtime.store.verify_mission_chain(mission_id)
+        if not verdict["ok"]:
+            raise ApiError(409, "INTEGRITY_FAILURE",
+                           "mission event store failed integrity verification; "
+                           "refusing to expose a projection as trustworthy",
+                           {"mission_id": mission_id,
+                            "issue_count": len(verdict["issues"]),
+                            "first_issue": verdict["issues"][0] if verdict["issues"] else ""})
 
     # ---- decision pipeline (read-only, fixture) ----
     def _run_decision_pipeline(self, mission_id: str) -> dict[str, Any]:
@@ -296,6 +329,11 @@ class MissionService:
         with self._lock:
             return self._events_impl(mission_id)
 
+    def events_page(self, mission_id: str, *, after_sequence: int,
+                    limit: int = 500) -> dict[str, Any]:
+        with self._lock:
+            return self._events_page(mission_id, after_sequence=after_sequence, limit=limit)
+
     def receipts(self, mission_id: str) -> dict[str, Any]:
         with self._lock:
             return self._receipts_impl(mission_id)
@@ -335,6 +373,7 @@ class MissionService:
 
     def _get_mission_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)
+        self._assert_not_corrupted(mission_id)
         return {"envelope": self._envelope(mission), "mission": mission.to_dict()}
 
     def list_missions(self) -> dict[str, Any]:
@@ -350,6 +389,7 @@ class MissionService:
 
     def _decision_packet_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)
+        self._assert_not_corrupted(mission_id)
         events = self.runtime.store.list_events(mission_id)
         packet = None
         for ev in events:
@@ -362,6 +402,7 @@ class MissionService:
 
     def _proposed_plan_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)
+        self._assert_not_corrupted(mission_id)
         events = self.runtime.store.list_events(mission_id)
         plan = None
         plan_id = None
@@ -376,6 +417,7 @@ class MissionService:
     def _record_decision(self, mission_id: str, *, decision: ApprovalDecision, reason: str,
                          idempotency_key: str, expected_version: int | None) -> dict[str, Any]:
         with self._lock:
+            self._require_expected_version(expected_version)
             mission = self._get(mission_id)
             request_hash = hash_payload({"decision": decision.value, "reason": reason, "mission_id": mission_id})
             # Exact replay returns the stored receipt even after the state advanced.
@@ -386,6 +428,32 @@ class MissionService:
             if mission.current_state in TERMINAL_STATES:
                 raise ApiError(409, "MISSION_TERMINAL", "mission is terminal", {"state": mission.current_state.value})
             self._assert_version(mission, expected_version)
+            # Single-decision latch: exactly one terminal authority decision per
+            # (mission, plan/proposal version, requested scope). Backed by the
+            # UNIQUE(mission_id, idempotency_key) approvals constraint plus this
+            # atomic in-lock check — no stacked approvals, no last-approval-wins.
+            # Checked before the awaiting-approval gate so a later conflicting
+            # decision gets the precise DECISION_CONFLICT, not a state error.
+            scope = mission.plan_id or mission_id
+            for existing in self.runtime.store.list_approvals(mission_id):
+                if existing.decision not in (ApprovalDecision.ALLOW, ApprovalDecision.DENY):
+                    continue
+                if existing.scope != scope:
+                    continue
+                if (existing.decision == decision
+                        and existing.exact_requested_action == f"plan_decision:{decision.value}"):
+                    # Identical semantic replay: return the existing terminal decision.
+                    body = self._envelope(self._get(mission_id), receipt_id=existing.approval_id,
+                                          evidence_refs=[existing.approval_id])
+                    return {"envelope": body, "approval": existing.to_dict(),
+                            "authority_state": existing.decision.value,
+                            "executed": False, "idempotent_replay": True,
+                            "note": "approval already recorded; plan NOT executed (no mutation authority in V1)"}
+                raise ApiError(409, "DECISION_CONFLICT",
+                               "a terminal authority decision already exists for this "
+                               "mission/plan/scope; conflicting decisions are refused",
+                               {"existing_decision": existing.decision.value,
+                                "approval_id": existing.approval_id})
             if mission.current_state not in (MissionState.AWAITING_APPROVAL, MissionState.BLOCKED_POLICY):
                 raise ApiError(409, "NOT_AWAITING_APPROVAL",
                                "mission is not awaiting an approval decision",
@@ -410,8 +478,12 @@ class MissionService:
                 idempotency_key=idempotency_key,
             )
             recorded = self.runtime.record_approval(approval)
-            # Approval changes authority state only. An allow parks the plan as
-            # operator-approved but NEVER queues/executes it (no executor in V1).
+            # Approval changes authority state only. An allow parks the plan in
+            # APPROVED_NO_EXECUTION (a precise non-executing state); it NEVER
+            # queues/executes it (no executor in V1).
+            if decision == ApprovalDecision.ALLOW:
+                self.runtime.transition(mission_id, MissionState.APPROVED_NO_EXECUTION,
+                                        reason="plan_approved_no_execution_authority")
             body = self._envelope(self._get(mission_id), receipt_id=recorded.approval_id,
                                   evidence_refs=[recorded.approval_id])
             result = {"envelope": body, "approval": recorded.to_dict(),
@@ -436,6 +508,7 @@ class MissionService:
     def _lifecycle(self, mission_id: str, *, action: str, idempotency_key: str,
                    expected_version: int | None) -> dict[str, Any]:
         with self._lock:
+            self._require_expected_version(expected_version)
             mission = self._get(mission_id)
             request_hash = hash_payload({"action": action, "mission_id": mission_id})
             cached = self._idem_lookup(idempotency_key, request_hash)
@@ -451,8 +524,14 @@ class MissionService:
                     if mission.current_state != MissionState.PAUSED:
                         raise ApiError(409, "NOT_PAUSED", "only a paused mission can resume",
                                        {"state": mission.current_state.value})
-                    # Resume returns to AWAITING_APPROVAL (plan still a proposal).
-                    updated = self.runtime.transition(mission_id, MissionState.AWAITING_APPROVAL, reason="operator_resume")
+                    # Resume returns to the authority-correct parking state: an
+                    # approved plan resumes to APPROVED_NO_EXECUTION; a still-
+                    # pending plan resumes to AWAITING_APPROVAL.
+                    existing_approvals = self.runtime.store.list_approvals(mission_id)
+                    target = (MissionState.APPROVED_NO_EXECUTION
+                              if self._authority_state(mission, existing_approvals) == "APPROVED"
+                              else MissionState.AWAITING_APPROVAL)
+                    updated = self.runtime.transition(mission_id, target, reason="operator_resume")
                 elif action == "cancel":
                     updated = self.runtime.transition(mission_id, MissionState.CANCELLED, reason="operator_cancel")
                 else:
@@ -474,11 +553,62 @@ class MissionService:
 
     def _events_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)
+        self._assert_not_corrupted(mission_id)
         evs = [e.to_dict() for e in self.runtime.store.list_events(mission_id)]
         return {"envelope": self._envelope(mission), "events": evs, "count": len(evs)}
 
+    def _events_page(self, mission_id: str, *, after_sequence: int,
+                     limit: int = 500) -> dict[str, Any]:
+        """Read-only page of events strictly after a verified cursor."""
+        self._assert_not_corrupted(mission_id)
+        mission = self._get(mission_id)
+        rows = [e for e in self.runtime.store.list_events(mission_id)
+                if (e.sequence or 0) > after_sequence]
+        page = rows[:limit]
+        tail = rows[-1].sequence if rows else after_sequence
+        return {"envelope": self._envelope(mission),
+                "events": [e.to_dict() for e in page],
+                "count": len(page),
+                "tail_sequence": tail,
+                "has_more": len(rows) > len(page)}
+
+    def resolve_sse_cursor(self, mission_id: str, cursor: str | None) -> int:
+        """Validate a resume cursor against the verified chain. Fail closed."""
+        self._get(mission_id)  # 404 if unknown mission
+        verdict = self.runtime.store.verify_mission_chain(mission_id)
+        if not verdict["ok"]:
+            raise ApiError(409, "STREAM_CORRUPTED",
+                           "mission event stream failed integrity verification",
+                           {"mission_id": mission_id})
+        tail = verdict["tail_sequence"] or 0
+        if cursor is None or cursor == "":
+            return 0
+        try:
+            seq = int(cursor)
+        except (TypeError, ValueError):
+            raise ApiError(409, "UNKNOWN_CURSOR",
+                           "cursor is not a valid event sequence", {"cursor": str(cursor)[:80]})
+        if seq < 0:
+            raise ApiError(409, "UNKNOWN_CURSOR", "cursor precedes the stream",
+                           {"cursor": seq})
+        if seq > tail:
+            raise ApiError(409, "CURSOR_BEYOND_TAIL",
+                           "cursor is beyond the committed tail",
+                           {"cursor": seq, "tail": tail})
+        if seq > 0:
+            row = self.runtime.store._c().execute(
+                "SELECT 1 FROM mission_events WHERE mission_id=? AND sequence=?",
+                (mission_id, seq),
+            ).fetchone()
+            if row is None:
+                raise ApiError(409, "UNKNOWN_CURSOR",
+                               "cursor does not match a committed event for this mission",
+                               {"cursor": seq})
+        return seq
+
     def _receipts_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)
+        self._assert_not_corrupted(mission_id)
         receipts = [r.to_dict() for r in self.runtime.store.list_receipts(mission_id)]
         approvals = [a.to_dict() for a in self.runtime.store.list_approvals(mission_id)]
         checkpoints = [c.to_dict() for c in self.runtime.store.list_checkpoints(mission_id)]
@@ -487,9 +617,11 @@ class MissionService:
 
     def _recover_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)
+        self._assert_not_corrupted(mission_id)
         result = self.runtime.recover(mission_id)
         return {"envelope": self._envelope(self._get(mission_id)), "recovery": result}
 
     def _replay_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)
+        self._assert_not_corrupted(mission_id)
         return {"envelope": self._envelope(mission), "replay": self.runtime.replay(mission_id)}

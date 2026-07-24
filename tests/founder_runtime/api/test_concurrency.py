@@ -63,7 +63,8 @@ def test_concurrent_pause_resume_serialized(service):
 
     def _pause(i):
         try:
-            service.pause(mid, idempotency_key=f"pz-{i}")
+            service.pause(mid, idempotency_key=f"pz-{i}",
+                          expected_version=res["envelope"]["version"])
         except ApiError as e:
             errs.append(e)
 

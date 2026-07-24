@@ -46,13 +46,15 @@ def test_reject_requires_reason(service):
     res = service.create_mission(objective="status", idempotency_key="dup5")
     mid = res["envelope"]["mission_id"]
     with pytest.raises(ApiError) as ei:
-        service.reject_plan(mid, reason="", idempotency_key="rj1")
+        service.reject_plan(mid, reason="", idempotency_key="rj1",
+                            expected_version=res["envelope"]["version"])
     assert ei.value.status == 422
 
 
 def test_reject_records_authority_state(service):
     res = service.create_mission(objective="status", idempotency_key="dup6")
     mid = res["envelope"]["mission_id"]
-    out = service.reject_plan(mid, reason="too risky", idempotency_key="rj2")
+    out = service.reject_plan(mid, reason="too risky", idempotency_key="rj2",
+                              expected_version=res["envelope"]["version"])
     assert out["authority_state"] == "deny"
     assert out["executed"] is False

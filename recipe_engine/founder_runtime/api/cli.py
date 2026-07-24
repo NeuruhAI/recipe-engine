@@ -47,26 +47,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     f = sub.add_parser("follow-events", help="Stream mission events (read-only)")
     f.add_argument("--mission", required=True)
+    f.add_argument("--after", default=None,
+                   help="resume strictly after this committed event sequence (durable cursor)")
 
     a = sub.add_parser("approve", help="Approve the proposed plan (authority only; does not execute)")
     a.add_argument("--mission", required=True)
     a.add_argument("--reason", default="")
+    a.add_argument("--expected-version", type=int, default=None,
+                   help="mission version to approve at (default: current version, fetched first)")
 
     r = sub.add_parser("reject", help="Reject the proposed plan with a reason")
     r.add_argument("--mission", required=True)
     r.add_argument("--reason", required=True)
+    r.add_argument("--expected-version", type=int, default=None,
+                   help="mission version to reject at (default: current version, fetched first)")
 
     pa = sub.add_parser("pause", help="Pause a mission safely")
     pa.add_argument("--mission", required=True)
+    pa.add_argument("--expected-version", type=int, default=None)
 
     re_ = sub.add_parser("resume", help="Resume a paused mission")
     re_.add_argument("--mission", required=True)
+    re_.add_argument("--expected-version", type=int, default=None)
 
     ca = sub.add_parser("cancel", help="Cancel a mission safely")
     ca.add_argument("--mission", required=True)
+    ca.add_argument("--expected-version", type=int, default=None)
 
     rc = sub.add_parser("recover", help="Perform deterministic recovery for a mission")
     rc.add_argument("--mission", required=True)
+    rc.add_argument("--expected-version", type=int, default=None)
 
     sub.add_parser("adapters", help="Show organ/adapter status matrix")
     return p
@@ -74,6 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _print(obj) -> None:
     print(json.dumps(obj, indent=2, sort_keys=True))
+
+
+def _current_version(client: FounderRuntimeClient, mission_id: str) -> int:
+    return int(client.get_mission(mission_id)["envelope"]["version"])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -94,20 +108,38 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "get-mission":
             _print(client.get_mission(args.mission))
         elif args.command == "follow-events":
-            for ev in client.stream_events(args.mission):
+            for ev in client.stream_events(args.mission, after=args.after):
                 _print(ev)
         elif args.command == "approve":
-            _print(client.approve(args.mission, reason=args.reason))
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.approve(args.mission, reason=args.reason, expected_version=ver))
         elif args.command == "reject":
-            _print(client.reject(args.mission, reason=args.reason))
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.reject(args.mission, reason=args.reason, expected_version=ver))
         elif args.command == "pause":
-            _print(client.pause(args.mission))
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.pause(args.mission, expected_version=ver))
         elif args.command == "resume":
-            _print(client.resume(args.mission))
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.resume(args.mission, expected_version=ver))
         elif args.command == "cancel":
-            _print(client.cancel(args.mission))
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.cancel(args.mission, expected_version=ver))
         elif args.command == "recover":
-            _print(client.recover(args.mission))
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.recover(args.mission, expected_version=ver))
         elif args.command == "adapters":
             _print(client.adapters_status())
         return 0

@@ -1,9 +1,11 @@
 """Founder Runtime API v1 — loopback-only, operator-authenticated, fail closed.
 
 Binds 127.0.0.1 only. Every route (except health meta) requires a bearer token.
-State-changing routes require an Idempotency-Key header and accept an optional
-X-Expected-Version for optimistic concurrency control. No route executes a plan,
-mutates AXON, dispatches Workers, fetches a URL, or touches production.
+State-changing routes require an Idempotency-Key header AND an X-Expected-Version
+header (mandatory optimistic concurrency; exactly one terminal authority decision
+per mission/plan/scope). The SSE stream supports durable cursor resume via
+Last-Event-ID or an explicit ?after= cursor. No route executes a plan, mutates
+AXON, dispatches Workers, fetches a URL, or touches production.
 """
 
 from __future__ import annotations
@@ -62,6 +64,13 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
                 "message": "Idempotency-Key header is required for state-changing calls"})
         return idempotency_key.strip()
 
+    def _expected_version(x_expected_version: int | None) -> int:
+        if x_expected_version is None:
+            raise HTTPException(status_code=428, detail={
+                "code": "EXPECTED_VERSION_REQUIRED",
+                "message": "X-Expected-Version header is required for state-changing calls"})
+        return x_expected_version
+
     @app.exception_handler(ApiError)
     async def _api_error(_req: Request, exc: ApiError):
         return JSONResponse(status_code=exc.status, content={
@@ -93,12 +102,11 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
     # ---- missions ----
     @app.post("/v1/missions", status_code=201, dependencies=[Depends(require_auth)])
     async def create_mission(body: CreateMissionBody,
-                             idempotency_key: str | None = Header(default=None),
-                             x_expected_version: int | None = Header(default=None)):
+                             idempotency_key: str | None = Header(default=None)):
         key = _idem_key(idempotency_key)
         return service.create_mission(objective=body.objective, title=body.title,
                                       done_criteria=body.done_criteria,
-                                      idempotency_key=key, expected_version=x_expected_version)
+                                      idempotency_key=key)
 
     @app.get("/v1/missions", dependencies=[Depends(require_auth)])
     async def list_missions():
@@ -122,7 +130,7 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
                       x_expected_version: int | None = Header(default=None)):
         return service.approve_plan(mission_id, reason=body.reason,
                                     idempotency_key=_idem_key(idempotency_key),
-                                    expected_version=x_expected_version)
+                                    expected_version=_expected_version(x_expected_version))
 
     @app.post("/v1/missions/{mission_id}/reject", dependencies=[Depends(require_auth)])
     async def reject(mission_id: str, body: DecisionBody,
@@ -130,44 +138,55 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
                      x_expected_version: int | None = Header(default=None)):
         return service.reject_plan(mission_id, reason=body.reason,
                                    idempotency_key=_idem_key(idempotency_key),
-                                   expected_version=x_expected_version)
+                                   expected_version=_expected_version(x_expected_version))
 
     @app.post("/v1/missions/{mission_id}/pause", dependencies=[Depends(require_auth)])
     async def pause(mission_id: str,
                     idempotency_key: str | None = Header(default=None),
                     x_expected_version: int | None = Header(default=None)):
         return service.pause(mission_id, idempotency_key=_idem_key(idempotency_key),
-                             expected_version=x_expected_version)
+                             expected_version=_expected_version(x_expected_version))
 
     @app.post("/v1/missions/{mission_id}/resume", dependencies=[Depends(require_auth)])
     async def resume(mission_id: str,
                      idempotency_key: str | None = Header(default=None),
                      x_expected_version: int | None = Header(default=None)):
         return service.resume(mission_id, idempotency_key=_idem_key(idempotency_key),
-                              expected_version=x_expected_version)
+                              expected_version=_expected_version(x_expected_version))
 
     @app.post("/v1/missions/{mission_id}/cancel", dependencies=[Depends(require_auth)])
     async def cancel(mission_id: str,
                      idempotency_key: str | None = Header(default=None),
                      x_expected_version: int | None = Header(default=None)):
         return service.cancel(mission_id, idempotency_key=_idem_key(idempotency_key),
-                              expected_version=x_expected_version)
+                              expected_version=_expected_version(x_expected_version))
 
     @app.get("/v1/missions/{mission_id}/events", dependencies=[Depends(require_auth)])
     async def events(mission_id: str):
         return service.events(mission_id)
 
     @app.get("/v1/missions/{mission_id}/events/stream", dependencies=[Depends(require_auth)])
-    async def events_stream(mission_id: str):
-        # Snapshot the append-only log once, then stream it as SSE. Read-only.
-        service.get_mission(mission_id)  # 404 if unknown
+    async def events_stream(mission_id: str, request: Request,
+                            after: str | None = None):
+        # Durable, resumable, read-only stream over the append-only log. Resume
+        # strictly after the acknowledged cursor (Last-Event-ID header or the
+        # explicit ?after= query). Unknown/foreign/beyond-tail cursors and any
+        # integrity failure are explicit 409 errors; corrupted missions never
+        # stream. Snapshot then stream; ordering is the committed sequence.
+        cursor_raw = after if after not in (None, "") else request.headers.get("last-event-id")
+        after_seq = service.resolve_sse_cursor(mission_id, cursor_raw)
 
         async def gen():
-            data = service.events(mission_id)
-            for i, ev in enumerate(data["events"]):
-                yield f"id: {ev.get('sequence', i)}\nevent: {ev.get('event_type')}\ndata: {json.dumps(ev, sort_keys=True)}\n\n"
-                await asyncio.sleep(0)
-            yield "event: end\ndata: {\"status\":\"stream_complete\"}\n\n"
+            page_after = after_seq
+            while True:
+                page = service.events_page(mission_id, after_sequence=page_after)
+                for ev in page["events"]:
+                    yield f"id: {ev.get('sequence')}\nevent: {ev.get('event_type')}\ndata: {json.dumps(ev, sort_keys=True)}\n\n"
+                    await asyncio.sleep(0)
+                page_after = page["tail_sequence"]
+                if not page["has_more"]:
+                    break
+            yield f"id: {page_after}\nevent: end\ndata: {{\"status\":\"stream_complete\",\"tail_sequence\":{page_after}}}\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -184,6 +203,7 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
                       idempotency_key: str | None = Header(default=None),
                       x_expected_version: int | None = Header(default=None)):
         _idem_key(idempotency_key)  # recovery is idempotent but still requires a key
+        _expected_version(x_expected_version)  # recovery may mutate mission projection
         return service.recover(mission_id)
 
     # ---- adapters / organ status ----
