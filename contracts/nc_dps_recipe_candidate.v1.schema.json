@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neuruh.local/contracts/nc_dps_recipe_candidate.v1.schema.json",
+  "title": "NC DPS Recipe Candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "property_id",
+    "strategy_id",
+    "eligible",
+    "disqualifiers",
+    "economics",
+    "execution_plan",
+    "evidence",
+    "governance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "nc_dps_recipe_candidate.v1"
+    },
+    "candidate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "property_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "strategy_id": {
+      "type": "string",
+      "enum": [
+        "whole_property_acquisition",
+        "fractional_interest_acquisition",
+        "heir_property_jv",
+        "title_cure_and_resale",
+        "stalled_tax_case_resolution",
+        "tax_foreclosure_sale_bid",
+        "surplus_funds_recovery",
+        "monitor",
+        "reject"
+      ]
+    },
+    "eligible": {
+      "type": "boolean"
+    },
+    "disqualifiers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "economics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acquisition_cost",
+        "title_cure_cost",
+        "legal_cost",
+        "carrying_cost",
+        "disposition_cost",
+        "gross_exit_value",
+        "expected_net_value",
+        "risk_adjusted_value"
+      ],
+      "properties": {
+        "acquisition_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "title_cure_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "legal_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "carrying_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "disposition_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "gross_exit_value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "expected_net_value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "risk_adjusted_value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "execution_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_summary",
+        "dependencies",
+        "reversible",
+        "legal_review_required",
+        "human_approval_required"
+      ],
+      "properties": {
+        "action_summary": {
+          "type": "string"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "reversible": {
+          "type": "boolean"
+        },
+        "legal_review_required": {
+          "const": true
+        },
+        "human_approval_required": {
+          "const": true
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "property_packet_version",
+        "property_packet_sha256",
+        "score_receipt_sha256",
+        "source_record_count",
+        "contradictions"
+      ],
+      "properties": {
+        "property_packet_version": {
+          "const": "nc_dps_property_packet.v1"
+        },
+        "property_packet_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "score_receipt_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source_record_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "contradictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "legal_conclusion_authorized",
+        "contact_authorized",
+        "offer_authorized",
+        "payment_authorized",
+        "filing_authorized",
+        "recording_authorized",
+        "execution_authorized"
+      ],
+      "properties": {
+        "legal_conclusion_authorized": {
+          "const": false
+        },
+        "contact_authorized": {
+          "const": false
+        },
+        "offer_authorized": {
+          "const": false
+        },
+        "payment_authorized": {
+          "const": false
+        },
+        "filing_authorized": {
+          "const": false
+        },
+        "recording_authorized": {
+          "const": false
+        },
+        "execution_authorized": {
+          "const": false
+        }
+      }
+    }
+  }
+}
