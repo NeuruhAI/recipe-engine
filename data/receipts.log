@@ -2,3 +2,9 @@
 2026-06-15T10:00:50Z run_id=daily-20260615T100000Z mode=no-engine exit=0 events=26 upserted=24 in_territory=2 report_only=24 engine_ok=0/0 sha256=524bc6871d8106ed20a94c3d527a24bafa437d1a62b1bb37d3dd717d0ace5551
 2026-06-16T10:00:50Z run_id=daily-20260616T100000Z mode=no-engine exit=0 events=24 upserted=6 in_territory=2 report_only=22 engine_ok=0/0 sha256=2827fd91617afe6545a54380447ea469f2dae45d0b158bd8895a9a49971b34db
 2026-06-17T10:00:54Z run_id=daily-20260617T100000Z mode=no-engine exit=0 events=25 upserted=6 in_territory=2 report_only=23 engine_ok=0/0 sha256=2ab2cea0b5eeaae711cd897254297db965a9cd8422e4088c9dda302eea433de3
+2026-06-19T10:00:58Z run_id=daily-20260619T100005Z mode=no-engine exit=0 events=32 upserted=25 in_territory=2 report_only=30 engine_ok=0/0 sha256=95755fbef43bdae0e0583399d9e5e94b9fc082d948b2d545f743774236aff56d
+2026-06-20T10:01:01Z run_id=daily-20260620T100004Z mode=no-engine exit=0 events=32 upserted=9 in_territory=3 report_only=29 engine_ok=0/0 sha256=c4f55855277cf71ee9346a0a952109d1204fc9e8af1d829fe141de3ff41da173
+2026-06-21T10:00:49Z run_id=daily-20260621T100000Z mode=no-engine exit=0 events=35 upserted=22 in_territory=4 report_only=31 engine_ok=0/0 sha256=ae2293548501b3f7d5526947a5523e5b04c80f912e275c1c4e6629af89214af4
+2026-06-22T10:00:59Z run_id=daily-20260622T100003Z mode=no-engine exit=0 events=30 upserted=27 in_territory=0 report_only=30 engine_ok=0/0 sha256=c41a493b2f02eeb642cbfcaf159d70db9a0402d72b9fb74da801f521947fc8e9
+2026-06-24T10:00:48Z run_id=daily-20260624T100000Z mode=no-engine exit=0 events=29 upserted=9 in_territory=0 report_only=29 engine_ok=0/0 sha256=139fe1983460f5dea58aa5198f7162377000600c65768d1224d651bc6749abf3
+2026-06-25T10:00:56Z run_id=daily-20260625T100004Z mode=no-engine exit=0 events=25 upserted=10 in_territory=1 report_only=24 engine_ok=0/0 sha256=45c5805050e27fe02455d2241852b8aedf70a76df6b14595988e245d3fa5916f
