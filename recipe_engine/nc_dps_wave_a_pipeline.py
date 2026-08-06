@@ -31,30 +31,27 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 def choose_strategy(packet: dict[str, Any]) -> tuple[str, bool, list[str], str]:
     triggers = set(packet["scores"]["trigger_classes"])
     priority = packet["scores"]["composite_priority"]
+    source_urls = {
+        source.get("source_url")
+        for source in packet.get("source_records", [])
+        if source.get("source_url")
+    }
+    corroborated = len(source_urls) >= 2
+
     if "death_or_probate" in triggers:
-        return "heir_property_jv", priority >= 55, [], "Research heirs, probate status, and a counsel-approved joint-venture path."
+        return "heir_property_jv", corroborated and priority >= 55, [], "Research heirs, probate status, and a counsel-approved joint-venture path."
     if "title_chain_problem" in triggers or "recorded_lien_or_judgment" in triggers:
-        return "title_cure_and_resale", priority >= 55, [], "Complete title-curative diligence and compare cure-to-resale economics."
-    if "tax_distress" in triggers:
-        return "stalled_tax_case_resolution", priority >= 55, [], "Verify foreclosure stage, cure amount, ownership, and negotiated resolution options."
-    if "absentee_or_out_of_state" in triggers and priority >= 45:
+        return "title_cure_and_resale", corroborated and priority >= 55, [], "Complete title-curative diligence and compare cure-to-resale economics."
+    if "court_action" in triggers and "tax_distress" in triggers:
+        return "stalled_tax_case_resolution", corroborated and priority >= 55, [], "Verify the filed case, service history, cure amount, ownership, and resolution options."
+    if "tax_distress" in triggers and "absentee_or_out_of_state" in triggers and corroborated and priority >= 45:
         return "whole_property_acquisition", True, [], "Complete ownership, debt, condition, and valuation diligence before considering acquisition."
-    return "monitor", True, [], "Monitor for a second distress or title signal and continue automated enrichment."
+    return "monitor", True, [], "Keep in enrichment until parcel, title, court, probate, vacancy, or lien evidence corroborates the distress signal."
 
 
 def candidate(packet: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
     strategy, eligible, disqualifiers, action = choose_strategy(packet)
     value = packet["valuation"]["conservative_as_is_value"]
-    economics = {
-        "acquisition_cost": None,
-        "title_cure_cost": None,
-        "legal_cost": None,
-        "carrying_cost": None,
-        "disposition_cost": None,
-        "gross_exit_value": value,
-        "expected_net_value": None,
-        "risk_adjusted_value": None,
-    }
     result = {
         "schema_version": "nc_dps_recipe_candidate.v1",
         "candidate_id": hashlib.sha256(f"{packet['property_id']}|{strategy}".encode()).hexdigest(),
@@ -62,7 +59,16 @@ def candidate(packet: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]
         "strategy_id": strategy,
         "eligible": eligible,
         "disqualifiers": disqualifiers,
-        "economics": economics,
+        "economics": {
+            "acquisition_cost": None,
+            "title_cure_cost": None,
+            "legal_cost": None,
+            "carrying_cost": None,
+            "disposition_cost": None,
+            "gross_exit_value": value,
+            "expected_net_value": None,
+            "risk_adjusted_value": None,
+        },
         "execution_plan": {
             "action_summary": action,
             "dependencies": [
@@ -90,8 +96,14 @@ def candidate(packet: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]
 
 
 def dossier_text(packet: dict[str, Any], cand: dict[str, Any], rank: int) -> str:
-    sources = "\n".join(f"- {s['source_url']} ({s['evidence_class']}, confidence {s['confidence']})" for s in packet["source_records"])
-    next_steps = "\n".join(f"{i}. {step}" for i, step in enumerate(packet["next_research_steps"], 1))
+    sources = "\n".join(
+        f"- {source['source_url']} ({source['evidence_class']}, confidence {source['confidence']})"
+        for source in packet["source_records"]
+    )
+    next_steps = "\n".join(
+        f"{index}. {step}"
+        for index, step in enumerate(packet["next_research_steps"], 1)
+    )
     return f"""# NC DPS Decision Dossier — Rank {rank}
 
 ## Property
@@ -137,20 +149,34 @@ def build(packets_path: Path, receipts_path: Path, output_dir: Path) -> dict[str
     output_dir.mkdir(parents=True, exist_ok=True)
     dossiers = output_dir / "decision_dossiers"
     dossiers.mkdir(parents=True, exist_ok=True)
+
     packets = read_jsonl(packets_path)
-    receipts = {r["property_id"]: r for r in read_jsonl(receipts_path)}
-    candidates = []
+    receipts = {row["property_id"]: row for row in read_jsonl(receipts_path)}
+    candidates: list[dict[str, Any]] = []
+    monitored = 0
+
     for rank, packet in enumerate(packets, 1):
         cand = candidate(packet, receipts[packet["property_id"]])
+        if cand["strategy_id"] == "monitor":
+            monitored += 1
+            continue
         candidates.append(cand)
         safe_name = packet["property_id"].replace(":", "_").replace("/", "_")
-        (dossiers / f"{rank:03d}_{safe_name}.md").write_text(dossier_text(packet, cand, rank), encoding="utf-8")
+        (dossiers / f"{rank:03d}_{safe_name}.md").write_text(
+            dossier_text(packet, cand, rank),
+            encoding="utf-8",
+        )
+
     write_jsonl(output_dir / "strategy_candidates.jsonl", candidates)
     summary = {
         "property_packets": len(packets),
         "strategy_candidates": len(candidates),
+        "monitored_or_enrichment": monitored,
         "dossiers": len(list(dossiers.glob("*.md"))),
-        "strategies": {name: sum(1 for c in candidates if c["strategy_id"] == name) for name in sorted({c["strategy_id"] for c in candidates})},
+        "strategies": {
+            name: sum(1 for row in candidates if row["strategy_id"] == name)
+            for name in sorted({row["strategy_id"] for row in candidates})
+        },
     }
     (output_dir / "recipe_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return summary
