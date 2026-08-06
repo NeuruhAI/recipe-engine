@@ -35,10 +35,12 @@ def choose_strategy(packet: dict[str, Any]) -> tuple[str, bool, list[str], str]:
         return "heir_property_jv", priority >= 55, [], "Research heirs, probate status, and a counsel-approved joint-venture path."
     if "title_chain_problem" in triggers or "recorded_lien_or_judgment" in triggers:
         return "title_cure_and_resale", priority >= 55, [], "Complete title-curative diligence and compare cure-to-resale economics."
-    if "tax_distress" in triggers:
-        return "stalled_tax_case_resolution", priority >= 55, [], "Verify foreclosure stage, cure amount, ownership, and negotiated resolution options."
+    if "court_action" in triggers and "tax_distress" in triggers:
+        return "stalled_tax_case_resolution", priority >= 55, [], "Verify the filed case, service history, cure amount, ownership, and negotiated resolution options."
     if "absentee_or_out_of_state" in triggers and priority >= 45:
         return "whole_property_acquisition", True, [], "Complete ownership, debt, condition, and valuation diligence before considering acquisition."
+    if "tax_distress" in triggers:
+        return "monitor", True, [], "Keep in enrichment until parcel, title, court, probate, vacancy, or lien evidence corroborates the tax signal."
     return "monitor", True, [], "Monitor for a second distress or title signal and continue automated enrichment."
 
 
@@ -142,6 +144,8 @@ def build(packets_path: Path, receipts_path: Path, output_dir: Path) -> dict[str
     candidates = []
     for rank, packet in enumerate(packets, 1):
         cand = candidate(packet, receipts[packet["property_id"]])
+        if cand["strategy_id"] == "monitor":
+            continue
         candidates.append(cand)
         safe_name = packet["property_id"].replace(":", "_").replace("/", "_")
         (dossiers / f"{rank:03d}_{safe_name}.md").write_text(dossier_text(packet, cand, rank), encoding="utf-8")

@@ -15,7 +15,7 @@ class WaveARecipeTests(unittest.TestCase):
         }
         receipt = {"property_id": packet["property_id"], "route": "automated_enrichment_then_analyst"}
         result = candidate(packet, receipt)
-        self.assertEqual(result["strategy_id"], "stalled_tax_case_resolution")
+        self.assertEqual(result["strategy_id"], "whole_property_acquisition")
         self.assertTrue(result["eligible"])
         self.assertFalse(any(result["governance"].values()))
 
