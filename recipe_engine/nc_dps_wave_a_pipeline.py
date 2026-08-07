@@ -30,16 +30,63 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def choose_strategy(packet: dict[str, Any]) -> tuple[str, bool, list[str], str]:
     triggers = set(packet["scores"]["trigger_classes"])
-    priority = packet["scores"]["composite_priority"]
+    priority = float(packet["scores"]["composite_priority"])
+
     if "death_or_probate" in triggers:
-        return "heir_property_jv", priority >= 55, [], "Research heirs, probate status, and a counsel-approved joint-venture path."
+        return (
+            "heir_property_jv",
+            priority >= 55,
+            [],
+            "Research heirs, probate status, and a counsel-approved joint-venture path.",
+        )
+
     if "title_chain_problem" in triggers or "recorded_lien_or_judgment" in triggers:
-        return "title_cure_and_resale", priority >= 55, [], "Complete title-curative diligence and compare cure-to-resale economics."
+        return (
+            "title_cure_and_resale",
+            priority >= 55,
+            [],
+            "Complete title-curative diligence and compare cure-to-resale economics.",
+        )
+
+    # A published delinquent-tax row is not a court case. The stalled-case
+    # strategy requires independently observed court activity.
+    if "tax_distress" in triggers and "court_action" in triggers:
+        return (
+            "stalled_tax_case_resolution",
+            priority >= 55,
+            [],
+            "Verify the actual court case, foreclosure stage, cure amount, ownership, and negotiated resolution options.",
+        )
+
     if "tax_distress" in triggers:
-        return "stalled_tax_case_resolution", priority >= 55, [], "Verify foreclosure stage, cure amount, ownership, and negotiated resolution options."
+        if "absentee_or_out_of_state" in triggers and priority >= 45:
+            return (
+                "whole_property_acquisition",
+                True,
+                [],
+                "Continue ownership, debt, title, condition, and valuation diligence; do not treat tax delinquency as a filed court case.",
+            )
+        return (
+            "monitor",
+            True,
+            [],
+            "Enrich the tax-distress record and wait for corroborating ownership, court, title, probate, vacancy, or entity evidence.",
+        )
+
     if "absentee_or_out_of_state" in triggers and priority >= 45:
-        return "whole_property_acquisition", True, [], "Complete ownership, debt, condition, and valuation diligence before considering acquisition."
-    return "monitor", True, [], "Monitor for a second distress or title signal and continue automated enrichment."
+        return (
+            "whole_property_acquisition",
+            True,
+            [],
+            "Complete ownership, debt, condition, and valuation diligence before considering acquisition.",
+        )
+
+    return (
+        "monitor",
+        True,
+        [],
+        "Monitor for a second distress or title signal and continue automated enrichment.",
+    )
 
 
 def candidate(packet: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
@@ -90,8 +137,13 @@ def candidate(packet: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]
 
 
 def dossier_text(packet: dict[str, Any], cand: dict[str, Any], rank: int) -> str:
-    sources = "\n".join(f"- {s['source_url']} ({s['evidence_class']}, confidence {s['confidence']})" for s in packet["source_records"])
-    next_steps = "\n".join(f"{i}. {step}" for i, step in enumerate(packet["next_research_steps"], 1))
+    sources = "\n".join(
+        f"- {s['source_url']} ({s['evidence_class']}, confidence {s['confidence']})"
+        for s in packet["source_records"]
+    )
+    next_steps = "\n".join(
+        f"{i}. {step}" for i, step in enumerate(packet["next_research_steps"], 1)
+    )
     return f"""# NC DPS Decision Dossier — Rank {rank}
 
 ## Property
@@ -144,13 +196,20 @@ def build(packets_path: Path, receipts_path: Path, output_dir: Path) -> dict[str
         cand = candidate(packet, receipts[packet["property_id"]])
         candidates.append(cand)
         safe_name = packet["property_id"].replace(":", "_").replace("/", "_")
-        (dossiers / f"{rank:03d}_{safe_name}.md").write_text(dossier_text(packet, cand, rank), encoding="utf-8")
+        (dossiers / f"{rank:03d}_{safe_name}.md").write_text(
+            dossier_text(packet, cand, rank), encoding="utf-8"
+        )
     write_jsonl(output_dir / "strategy_candidates.jsonl", candidates)
     summary = {
         "property_packets": len(packets),
         "strategy_candidates": len(candidates),
         "dossiers": len(list(dossiers.glob("*.md"))),
-        "strategies": {name: sum(1 for c in candidates if c["strategy_id"] == name) for name in sorted({c["strategy_id"] for c in candidates})},
+        "strategies": {
+            name: sum(1 for c in candidates if c["strategy_id"] == name)
+            for name in sorted({c["strategy_id"] for c in candidates})
+        },
     }
-    (output_dir / "recipe_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (output_dir / "recipe_summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
     return summary
