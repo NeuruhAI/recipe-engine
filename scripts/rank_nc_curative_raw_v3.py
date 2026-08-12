@@ -66,6 +66,19 @@ def annotate(row: dict[str, Any]) -> dict[str, Any]:
 def run(input_csv: Path, output_dir: Path) -> dict[str, Any]:
     summary = v2.run(input_csv, output_dir)
 
+    deedsonar = output_dir / "DEEDSONAR_RAW_IMPORT.csv"
+    if deedsonar.exists():
+        with deedsonar.open(newline="", encoding="utf-8-sig") as fh:
+            rows = [dict(r) for r in csv.DictReader(fh)]
+        for row in rows:
+            row["scoring_version"] = SCORING_VERSION
+            row["recipe_version"] = RECIPE_VERSION
+        if rows:
+            with deedsonar.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+
     distribution: Counter[int] = Counter()
     for name in ("NC_CURATIVE_ALL.csv", "NC_CURATIVE_TOP_500.csv", "NC_CURATIVE_TOP_100.csv"):
         path = output_dir / name
