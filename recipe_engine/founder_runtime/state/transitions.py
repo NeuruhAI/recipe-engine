@@ -23,6 +23,12 @@ TRANSITIONS: dict[S, frozenset[S]] = {
     }),
     S.AWAITING_APPROVAL: frozenset({
         S.QUEUED, S.BLOCKED_POLICY, S.CANCELLED, S.PAUSED, S.PLANNING,
+        S.APPROVED_NO_EXECUTION,
+    }),
+    # Approved but with no execution authority: a parking state. It cannot reach
+    # QUEUED/EXECUTING; only operator lifecycle controls remain.
+    S.APPROVED_NO_EXECUTION: frozenset({
+        S.CANCELLED, S.PAUSED, S.BLOCKED_POLICY, S.PLANNING,
     }),
     S.QUEUED: frozenset({
         S.EXECUTING, S.PAUSED, S.CANCELLED, S.BLOCKED_DEPENDENCY,
@@ -51,7 +57,7 @@ TRANSITIONS: dict[S, frozenset[S]] = {
     }),
     S.PAUSED: frozenset({
         S.QUEUED, S.EXECUTING, S.PLANNING, S.CONTEXT_RESOLUTION, S.AWAITING_APPROVAL,
-        S.RECOVERING, S.CANCELLED, S.SUPERSEDED, S.INTAKE,
+        S.RECOVERING, S.CANCELLED, S.SUPERSEDED, S.INTAKE, S.APPROVED_NO_EXECUTION,
     }),
     S.RECOVERING: frozenset({
         S.QUEUED, S.EXECUTING, S.VERIFYING, S.RECONCILING, S.PAUSED, S.FAILED_RETRYABLE,
