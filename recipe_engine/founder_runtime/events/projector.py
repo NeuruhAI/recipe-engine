@@ -124,7 +124,7 @@ def apply_event(mission: Mission | None, event: MissionEvent) -> Mission:
         EventType.RECEIPT_RECORDED, EventType.CHECKPOINT_RECORDED,
         EventType.ARTIFACT_REGISTERED, EventType.OUTCOME_RECORDED,
         EventType.GOVERNANCE_RECORDED, EventType.SIDE_EFFECT_MARKED,
-        EventType.SIDE_EFFECT_RECONCILED,
+        EventType.SIDE_EFFECT_RECONCILED, EventType.PLAN_COMPILED,
     }:
         ext = dict(m.extensions or {})
         key = f"{et.value}_refs"

@@ -13,8 +13,49 @@ from recipe_engine.founder_runtime.state.states import MissionState
 from recipe_engine.founder_runtime.ids import new_uuid, hash_payload, stable_id
 from recipe_engine.founder_runtime.adapters.fixture_iar import FixtureIAR
 from .deliverables import system_status_deliverables
-from .constraints import DEFAULT_CONSTRAINTS
+from .constraints import (
+    AuthorityEnvelope,
+    DEFAULT_CONSTRAINTS,
+    extract_resource_budget,
+    extract_time_budget,
+    extract_with_provenance,
+)
 from .authority import classify_authority
+
+
+# The organism this runtime plans inside.  Bound here rather than imported from
+# live_adapters: the founder_runtime -> live_adapters dependency is one-way, and
+# the AST confinement scan depends on it staying that way.
+DEFAULT_WORLD = "neuruh"
+
+_DOMAIN_BY_CLASS = {
+    MissionClass.SYSTEM_STATUS: "organism_status",
+    MissionClass.ANALYSIS: "analysis",
+    MissionClass.PLANNING: "planning",
+    MissionClass.RECOVERY: "recovery",
+}
+
+# Mission-level evidence every compiled mission owes, independent of its
+# deliverables.  A mission that cannot produce these cannot be completed.
+_BASE_REQUIRED_EVIDENCE = ("execution_receipts", "replay_projection", "authority_classification")
+
+
+def _approval_gates(requirements: list[Any]) -> list[str]:
+    """Per-mission approval gates implied by its authority classification.
+
+    Gates were previously a single global frozen set identical for every
+    mission.  These are the gates *this* mission must pass, recorded on the
+    contract so a reviewer can see them without reading the transition table.
+    """
+    gates: list[str] = []
+    for req in requirements:
+        if getattr(req, "requires_approval", False):
+            gates.append(f"approval_required:{req.authority_class.value}:{req.action}")
+        if getattr(req, "enhanced", False):
+            gates.append(f"enhanced_review:{req.authority_class.value}")
+    # Approval records authority state; it never confers execution.
+    gates.append("approval_confers_no_execution")
+    return gates
 
 
 def _validate_iar_output(raw: dict[str, Any]) -> dict[str, Any]:
@@ -61,6 +102,7 @@ def compile_intent_to_mission(
     principal: Principal | None = None,
     creation_idempotency_key: str = "",
     iar: FixtureIAR | None = None,
+    envelope: AuthorityEnvelope = AuthorityEnvelope.READ_ONLY_FIXTURE,
 ) -> tuple[Mission, dict[str, Any]]:
     principal = principal or Principal.jeramie_fixture()
     if principal.principal_id != "jeramie":
@@ -105,6 +147,23 @@ def compile_intent_to_mission(
         extensions = {"ambiguity": ambiguity, "intent": intent}
 
     risk = RiskClass(interpretation.get("risk_class", "medium")) if interpretation.get("risk_class") in {r.value for r in RiskClass} else RiskClass.MEDIUM
+
+    extraction = extract_with_provenance(request_text, envelope=envelope)
+    authority_requirements = classify_authority(request_text, canonical_action=intent)
+    required_evidence = list(_BASE_REQUIRED_EVIDENCE)
+    for d in deliverables:
+        for ev in d.evidence_requirements:
+            if ev not in required_evidence:
+                required_evidence.append(ev)
+    # The IAR's structured output was previously validated and then discarded.
+    # It is untrusted, so it never becomes contract truth — but it is retained as
+    # declared interpretation material so a reviewer can see what was proposed.
+    extensions = dict(extensions)
+    extensions["iar_entities"] = list(interpretation.get("entities") or [])
+    extensions["iar_candidate_strategy_hints"] = list(interpretation.get("candidate_strategy_hints") or [])
+    extensions["constraint_provenance"] = [dict(p) for p in extraction.provenance]
+    extensions["authority_envelope"] = envelope.value
+
     mission = Mission(
         schema_version=SCHEMA_MISSION,
         mission_id=new_uuid("msn"),
@@ -119,27 +178,34 @@ def compile_intent_to_mission(
         current_state=state,
         desired_outcome="verified_status_and_safe_plan" if intent == "system_status" else "clarified_or_planned",
         deliverables=deliverables,
-        constraints=list(DEFAULT_CONSTRAINTS),
-        authority_requirements=classify_authority(request_text, canonical_action=intent),
+        constraints=list(extraction.constraints),
+        authority_requirements=authority_requirements,
         context_requirements=["founder_core", "architecture", "current_runtime"] if intent == "system_status" else ["founder_core"],
         verification_criteria=["receipts_valid", "deliverables_present", "replay_matches"],
         completion_rule="all_required_deliverables",
         created_at=clock_now,
         updated_at=clock_now,
         creation_idempotency_key=creation_idempotency_key,
+        non_goals=list(extraction.non_goals),
+        world=DEFAULT_WORLD,
+        domain=_DOMAIN_BY_CLASS.get(mission_class, "general"),
+        time_budget=extract_time_budget(request_text),
+        resource_budget=extract_resource_budget(request_text, mission_class=mission_class.value),
+        required_evidence=required_evidence,
+        approval_gates=_approval_gates(authority_requirements),
         extensions=extensions,
     )
     mission.recompute_input_hash()
     errs = validate_mission_dict(mission.to_dict())
-    # BLOCKED_INPUT missions may have empty deliverables — allow with completion_rule still valid
-    if state != MissionState.BLOCKED_INPUT and errs:
-        raise MissionSchemaInvalid("compiled mission invalid", {"errors": errs})
-    if state == MissionState.BLOCKED_INPUT:
-        # still need valid autonomy and completion rule
-        filtered = [e for e in errs if "deliverable" not in e]
-        # validate_mission_dict doesn't check deliverables emptiness
-        if errs:
-            # only schema fields
-            bad = [e for e in errs if not e.startswith("invalid")]
-            pass
+    # A BLOCKED_INPUT mission is allowed to carry no deliverables — it exists to
+    # ask one precise question — but it is not exempt from schema validity.  The
+    # previous branch computed two unused lists and fell through to `pass`, so
+    # every schema error on a blocked mission was silently discarded.
+    # validate_mission_dict reports nothing about deliverables, so there is
+    # nothing here to filter: any error it returns is a genuine schema error.
+    if errs:
+        raise MissionSchemaInvalid(
+            "compiled mission invalid",
+            {"errors": errs, "state": state.value},
+        )
     return mission, interpretation

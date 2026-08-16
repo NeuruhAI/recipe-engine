@@ -1,6 +1,6 @@
 """Local SQLite schema for Founder Runtime P1. No production DB."""
 
-SCHEMA_VERSION = "fr.sqlite.v2"
+SCHEMA_VERSION = "fr.sqlite.v3"
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -149,4 +149,36 @@ CREATE TABLE IF NOT EXISTS outcomes (
   body_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS decision_packets (
+  packet_id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(mission_id),
+  body_json TEXT NOT NULL,
+  receipt_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_packets_mission ON decision_packets(mission_id);
+
+-- An execution plan is immutable by content hash, but a mission may compile
+-- more than one over its life (replan on contradicted evidence).  plan_version
+-- plus supersedes records that lineage; the plan is bound to the mission, to
+-- the packet it was selected from, and to the authority and evidence it rests
+-- on, none of which the plan object itself carried.
+CREATE TABLE IF NOT EXISTS plans (
+  plan_id TEXT PRIMARY KEY,
+  mission_id TEXT NOT NULL REFERENCES missions(mission_id),
+  packet_id TEXT,
+  plan_version INTEGER NOT NULL,
+  supersedes TEXT,
+  strategy_id TEXT NOT NULL,
+  body_json TEXT NOT NULL,
+  plan_receipt TEXT NOT NULL,
+  authority_binding_json TEXT NOT NULL,
+  evidence_refs_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(mission_id, plan_version)
+);
+
+CREATE INDEX IF NOT EXISTS ix_plans_mission ON plans(mission_id);
 """

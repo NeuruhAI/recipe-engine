@@ -278,16 +278,31 @@ def make_green_host_audit(base: Path, *, root_name: str = ROOT_FINAL, ts: str = 
 
 
 # ------------------------------------------------------------------ canned bodies
-def qdrant_routes(count: int = 3049, manifest_id: str = "vault-canon-remediated-20260718T054050Z-cct22",
-                  count_after: int | None = None) -> dict:
+# Mirrors the ratified canon: the mock serves the same identity the live
+# collection does, so an adapter that would fail against production fails here.
+QDRANT_TEST_COLLECTION = "neuruh_canon_v20260816"
+QDRANT_TEST_COUNT = 11756
+
+
+def qdrant_routes(count: int = QDRANT_TEST_COUNT, count_after: int | None = None,
+                  collection: str = QDRANT_TEST_COLLECTION,
+                  embedding_model: str = "nomic-embed-text",
+                  embedding_dim: int = 768, vector_size: int = 768,
+                  distance: str = "Cosine", source_tree: str = "neuruh-vault") -> dict:
     ca = count if count_after is None else count_after
     return {
         ("GET", "/readyz"): (200, {}),
-        ("GET", "/"): (200, {"title": "qdrant", "version": "1.13.2"}),
-        ("GET", "/collections/neuruh_vault_canon"): (200, {"result": {"status": "green", "points_count": count}, "status": "ok"}),
-        ("POST", "/collections/neuruh_vault_canon/points/count"): _count_toggle(count, ca),
-        ("POST", "/collections/neuruh_vault_canon/points/scroll"):
-            (200, {"result": {"points": [{"id": 907989612130417, "payload": {"manifest_id": manifest_id}}], "next_page_offset": None}, "status": "ok"}),
+        ("GET", "/"): (200, {"title": "qdrant", "version": "1.19.0"}),
+        ("GET", f"/collections/{collection}"): (200, {"result": {
+            "status": "green", "points_count": count,
+            "config": {"params": {"vectors": {"size": vector_size, "distance": distance}}},
+        }, "status": "ok"}),
+        ("POST", f"/collections/{collection}/points/count"): _count_toggle(count, ca),
+        ("POST", f"/collections/{collection}/points/scroll"):
+            (200, {"result": {"points": [{"id": 907989612130417, "payload": {
+                "embedding_model": embedding_model, "embedding_dim": embedding_dim,
+                "source_tree": source_tree, "path": "01-CANON/example.md", "chunk": 0,
+            }}], "next_page_offset": None}, "status": "ok"}),
     }
 
 

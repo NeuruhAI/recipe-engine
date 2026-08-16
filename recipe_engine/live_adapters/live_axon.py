@@ -50,6 +50,11 @@ _OP_TRAVERSAL = "traversal_probe"
 # Caller-controlled arbitrary paths are impossible: a request names an id.
 DEFAULT_READ_ALLOWLIST = {"axon_readme": "README.md", "axon_package": "package.json"}
 
+# Target for the mutation negative control.  Names no real artifact in any
+# repository, so a misconfigured gateway has nothing to damage.  The gate under
+# test refuses on the tool class (file_write), which this exercises identically.
+MUTATION_PROBE_SENTINEL = ".neuruh-mutation-probe-sentinel__must-never-exist"
+
 
 class LiveAxonReadonlyAdapter(LiveAdapterBase):
     # NOTE: canonical adapter name is "axon_readonly" to match the timeouts
@@ -92,7 +97,7 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
                     "AXON source SHA is not the promoted f3a94d1",
                     {"expected_promoted": CANONICAL_AXON_SHA, "configured": self._expected_sha},
                 )
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 5_000)
+            timeout = self.op_timeout(_OP_IDENTITY, meta)
             resp = self._request("/health", timeout=timeout)
             if resp.status != 200:
                 raise TransportMalformed(f"axon health returned {resp.status}")
@@ -121,7 +126,7 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(None, context="axon.tools_census")
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 5_000)
+            timeout = self.op_timeout(_OP_TOOLS, meta)
             resp = self._request("/api/tools", timeout=timeout)
             if resp.status != 200:
                 raise TransportMalformed(f"axon tools returned {resp.status}")
@@ -156,7 +161,7 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
             if path_id not in self._read_allowlist:
                 raise UnsafeCapability("governed read path id is not allowlisted (no caller-controlled paths)", {"path_id": str(path_id)})
             expected_path = self._read_allowlist[path_id]
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 30_000)
+            timeout = self.op_timeout(_OP_READ, meta)
             action = {
                 "tool": "file_read",
                 "path": expected_path,
@@ -190,7 +195,7 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(None, context="axon.traversal_probe")
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 5_000)
+            timeout = self.op_timeout(_OP_TRAVERSAL, meta)
             action = {"tool": "file_read", "path": "../../etc/passwd", "read_only": True}
             resp = self._request("/api/tasks/execute", timeout=timeout, method="POST", body={"task": "traversal_probe", "action": action})
             body = resp.json() if resp.status in (200, 400, 403) else {"ok": None}
@@ -215,11 +220,25 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
         A DENIED result here is the SUCCESS condition — the mutation path is
         unreachable and unauthorized.  We never import the UP-3 module; we only
         confirm the HTTP surface refuses.
+
+        The probe is a negative control, so it is the one read-only operation
+        that deliberately issues a mutation-shaped request.  Two properties keep
+        that safe and honest:
+
+        * The target is ``MUTATION_PROBE_SENTINEL`` — a path that names no real
+          artifact in any repository.  The gateway must refuse on the *tool
+          class* (``file_write``), never on the path, so a sentinel exercises the
+          identical authorization gate.  A real path such as ``README.md`` would
+          be written if the gateway were ever misconfigured; this cannot be.
+        * The envelope declares ``mutation_attempted=True``.  A receipt that
+          recorded ``False`` here would attest that no mutation was attempted
+          while a ``file_write`` was on the wire — a fabricated attestation.
         """
         t0 = time.monotonic()
         try:
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 5_000)
-            action = {"tool": "file_write", "path": "README.md", "content": "x"}
+            reject_mutation_shaped(None, context="axon.mutation_probe")
+            timeout = self.op_timeout(_OP_IDENTITY, meta)
+            action = {"tool": "file_write", "path": MUTATION_PROBE_SENTINEL, "content": ""}
             resp = self._request("/api/tasks/execute", timeout=timeout, method="POST", body={"task": "mutation_probe", "action": action})
             body = resp.json() if resp.status in (200, 400, 401, 403) else {}
             denied = (
@@ -251,6 +270,7 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
             operation=_OP_IDENTITY, meta=meta, status=AdapterResultStatus.DENIED, payload=payload,
             dependency_identity=dep, provenance=prov, observed_sha=observed_sha,
             error_code="MUTATION_NOT_AUTHORIZED", evidence_refs=["axon:mutation_denied"], duration_ms=dur,
+            mutation_attempted=True,
         )
 
     # --- Protocol parity: receipt-producing read-only step -----------------
@@ -266,21 +286,34 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
         result = self.identity(meta)
         if result.status != AdapterResultStatus.SUCCESS.value:
             raise AdapterUnavailable("AXON read-only surface unavailable for governed step", {"status": result.status})
-        output = {"axon_identity": result.payload, "mutation": False}
+        # Protocol parity with FixtureAxon.execute_readonly_step, which carries
+        # the caller's outcome_data.  Discarding it here silently dropped the
+        # step's own evidence from every live receipt, leaving the receipt
+        # attesting only that AXON was reachable — so a live mission could not
+        # resume from its own receipts.  The AXON identity is retained alongside
+        # as the corroboration that the read-only surface answered.
+        output = dict(kwargs.get("outcome_data") or {})
+        output["axon_identity"] = result.payload
+        output["mutation"] = False
+        capability = str(kwargs.get("capability") or "axon.identity")
+        output_hash = hash_payload(output)
         receipt = ExecutionReceipt(
             schema_version=SCHEMA_RECEIPT,
             receipt_id=stable_id("live_rcpt", mission_id, plan_id, step_id, input_hash),
             mission_id=mission_id, plan_id=plan_id, step_id=step_id,
-            executor="live_axon", capability=str(kwargs.get("capability") or "axon.identity"),
+            executor="live_axon", capability=capability,
             started_at=started_at, ended_at=ended_at, status=ReceiptStatus.SUCCESS,
-            input_hash=input_hash, output_hash=hash_payload(output),
+            input_hash=input_hash, output_hash=output_hash,
             repository_metadata={"mode": "live", "mutation": False},
             files_changed=[], tests=[TestResult(name="axon_readonly_identity", passed=True)],
             artifacts=[], error=None,
             authority_reference=str(kwargs.get("authority_reference") or "not_claimed_by_governance"),
             idempotency_key=f"live_step:{mission_id}:{plan_id}:{step_id}",
             evidence_class="live_observed", trust_level="live_observed", producer_identity="live_axon",
-            action_binding=f"axon.identity:{input_hash}:{hash_payload(output)}",
+            # Bind to the capability actually exercised, not a fixed literal: a
+            # step declaring a different capability produced a receipt whose
+            # action_binding described an operation it had not performed.
+            action_binding=f"{capability}:{input_hash}:{output_hash}",
             outcome_data=output, mutation_authorized=False,
         )
         receipt.compute_hash()

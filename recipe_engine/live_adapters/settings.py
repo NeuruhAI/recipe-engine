@@ -74,8 +74,14 @@ class LiveAdapterSettings:
 
     repo_roots: tuple[RepoRoot, ...] = ()
     endpoints: tuple[LiveEndpoint, ...] = ()
-    qdrant_collection: str = "neuruh_vault_canon"
-    qdrant_point_baseline: int = 3049
+    # Current ratified canon (Gate B, 2026-08-16). Re-proved live, not renamed.
+    qdrant_collection: str = "neuruh_canon_v20260816"
+    qdrant_point_baseline: int = 11756
+    # The host-recovery assertion is a separate, historical fact: the sealed
+    # GREEN audit describes the collection extant at the time of that host
+    # recovery. It is not the current canon and must not track it.
+    host_recovery_collection: str = "neuruh_vault_canon"
+    host_recovery_point_count: int = 3049
     # Deprecated (P2-B host-gate-compat): a single caller-supplied audit *root* is
     # no longer honored by the gate — kept only for backward field-compatibility.
     host_recovery_audit_root: str | None = None

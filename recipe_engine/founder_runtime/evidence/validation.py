@@ -72,6 +72,67 @@ def validate_receipt(
     return errors
 
 
+def validate_live_receipt(
+    receipt: ExecutionReceipt,
+    *,
+    expected_mission_id: str,
+    expected_plan_id: str,
+    expected_step_id: str,
+    expected_input_hash: str | None = None,
+    expected_output: dict[str, Any] | None = None,
+) -> list[str]:
+    """Validate a receipt produced by a LIVE read-only adapter.
+
+    ``validate_receipt`` is fixture-only by construction: it requires a
+    ``fixture_gov`` authority reference, an A0/A1 class, ``evidence_class ==
+    "fixture"`` and ``trust_level == "fixture_only"``.  A live receipt can never
+    satisfy it, which is why no live step could previously be validated
+    end-to-end.  Rather than loosen those fixture guarantees, this is the live
+    counterpart: the same structural and anti-fabrication checks, with the trust
+    markers a live observation must carry instead.
+    """
+    errors: list[str] = []
+    if receipt.mission_id != expected_mission_id: errors.append("wrong_mission_id")
+    if receipt.plan_id != expected_plan_id: errors.append("wrong_plan_id")
+    if receipt.step_id != expected_step_id: errors.append("wrong_step_id")
+    if receipt.producer_identity != receipt.executor: errors.append("producer_identity_mismatch")
+    if not receipt.capability: errors.append("missing_capability")
+    if expected_input_hash is not None and receipt.input_hash != expected_input_hash:
+        errors.append("bad_input_hash")
+    if receipt.status != ReceiptStatus.SUCCESS: errors.append("status_not_success")
+    if not receipt.output_hash: errors.append("bad_output_hash")
+    if not receipt.outcome_data: errors.append("missing_outcome_evidence")
+    elif receipt.output_hash != hash_payload(receipt.outcome_data): errors.append("outcome_hash_mismatch")
+    if expected_output is not None and receipt.outcome_data != expected_output:
+        errors.append("outcome_binding_mismatch")
+    expected_action = f"{receipt.capability}:{receipt.input_hash}:{receipt.output_hash}"
+    if receipt.action_binding != expected_action: errors.append("action_binding_mismatch")
+    # Live trust markers: an observation must declare that it was observed live
+    # and must never claim it was authorized to mutate.
+    if receipt.evidence_class != "live_observed" or receipt.trust_level != "live_observed":
+        errors.append("invalid_live_trust")
+    if receipt.mutation_authorized or receipt.files_changed:
+        errors.append("live_mutation_forbidden")
+    if receipt.repository_metadata.get("mutation") not in (False, None):
+        errors.append("live_mutation_forbidden")
+    if any(token in receipt.capability.casefold() for token in ("write", "delete", "deploy", "send", "shell")):
+        errors.append("unsafe_live_capability")
+    if not receipt.idempotency_key: errors.append("missing_idempotency_key")
+    if receipt.started_at > receipt.ended_at: errors.append("timestamp_order")
+    if not receipt.receipt_hash: errors.append("missing_receipt_hash")
+    elif receipt.receipt_hash != receipt.computed_hash(): errors.append("tampered_receipt")
+    for test in receipt.tests:
+        if not test.name or not test.passed: errors.append("invalid_test_evidence")
+    return errors
+
+
+def assert_valid_live_receipt(receipt: ExecutionReceipt, **kwargs: Any) -> None:
+    errs = validate_live_receipt(receipt, **kwargs)
+    if errs:
+        raise ReceiptInvalid("live receipt validation failed",
+                             {"errors": errs, "receipt_id": receipt.receipt_id})
+
+
 def assert_valid_receipt(receipt: ExecutionReceipt, **kwargs: Any) -> None:
     errs = validate_receipt(receipt, **kwargs)
     if errs:

@@ -151,7 +151,7 @@ class QdrantGateTests(unittest.TestCase):
             self.assertFalse(res.payload["live_contacted"])
             self.assertFalse(res.payload["fixture_substituted"])
 
-    def test_gate_open_live_verification_3049(self):
+    def test_gate_open_live_verification_at_ratified_baseline(self):
         with tempfile.TemporaryDirectory() as td:
             H.write_sealed_audit(Path(td))  # GREEN final
             with H.mock_service(H.qdrant_routes()) as (port, _srv):
@@ -161,14 +161,19 @@ class QdrantGateTests(unittest.TestCase):
                 self.assertTrue(a.gate_decision().open)
                 res = a.verify_collection(_meta())
                 self.assertEqual(res.status, "success", res.payload)
-                self.assertEqual(res.payload["count_before"], 3049)
-                self.assertEqual(res.payload["count_after"], 3049)
+                self.assertEqual(res.payload["count_before"], H.QDRANT_TEST_COUNT)
+                self.assertEqual(res.payload["count_after"], H.QDRANT_TEST_COUNT)
                 self.assertFalse(res.payload["mutation_attempted"])
+                # The pin binds to retrieval identity, not just a name.
+                self.assertEqual(res.payload["embedding_model"], "nomic-embed-text")
+                self.assertEqual(res.payload["vector_size"], 768)
+                self.assertEqual(res.payload["distance"], "Cosine")
+                self.assertEqual(res.payload["source_tree"], "neuruh-vault")
 
     def test_gate_open_count_drift_malformed(self):
         with tempfile.TemporaryDirectory() as td:
             H.write_sealed_audit(Path(td))
-            with H.mock_service(H.qdrant_routes(count=3049, count_after=3048)) as (port, _srv):
+            with H.mock_service(H.qdrant_routes(count=H.QDRANT_TEST_COUNT, count_after=H.QDRANT_TEST_COUNT - 1)) as (port, _srv):
                 ep = H.endpoint("qdrant", port)
                 s = H.settings_with(endpoints=(ep,), host_recovery_audit_base=str(td))
                 res = LiveQdrantAdapter(s, http=H.http_client(ep)).verify_collection(_meta())

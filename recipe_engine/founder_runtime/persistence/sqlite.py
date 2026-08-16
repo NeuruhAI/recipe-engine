@@ -16,15 +16,25 @@ from recipe_engine.founder_runtime.contracts.checkpoint import Checkpoint
 from recipe_engine.founder_runtime.contracts.approval import Approval
 from recipe_engine.founder_runtime.contracts.receipts import ExecutionReceipt
 from recipe_engine.founder_runtime.contracts.completion import CompletionReport
+from .migrations import apply_migration, plan_migration
 from .schema import SCHEMA_SQL, SCHEMA_VERSION
+
+_SYNCHRONOUS_LEVELS = frozenset({"OFF", "NORMAL", "FULL", "EXTRA"})
 
 
 class SqliteStore:
     """Local transactional store. path must be temp or gitignored developer path."""
 
-    def __init__(self, path: str | Path, *, wal: bool = True):
+    def __init__(self, path: str | Path, *, wal: bool = True, synchronous: str = "FULL"):
         self.path = Path(path)
         self._wal = wal
+        # Durability level for the power-loss claim.  WAL defaults to NORMAL,
+        # under which a host power failure can discard the most recently
+        # committed transactions — the event append and its projection CAS are
+        # atomic with respect to each other but not durable with respect to the
+        # host.  FULL fsyncs the WAL on every commit, which is what "survives
+        # power loss" has to mean.  Tests may pass NORMAL for speed.
+        self._synchronous = synchronous
         self._conn: sqlite3.Connection | None = None
 
     def initialize(self) -> None:
@@ -37,19 +47,60 @@ class SqliteStore:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             except sqlite3.Error:
                 pass
-        self._conn.executescript(SCHEMA_SQL)
-        cur = self._conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'")
-        row = cur.fetchone()
-        if row is None:
+        if self._synchronous:
+            # Must follow journal_mode: setting WAL does not reset synchronous,
+            # but ordering keeps the intent obvious to the next reader.  PRAGMA
+            # takes no bound parameters, so the value is allowlisted rather than
+            # interpolated from whatever the caller passed.
+            level = str(self._synchronous).upper()
+            if level not in _SYNCHRONOUS_LEVELS:
+                raise PersistenceConflict(
+                    "unsupported synchronous level",
+                    {"requested": str(self._synchronous), "allowed": sorted(_SYNCHRONOUS_LEVELS)},
+                )
+            self._conn.execute(f"PRAGMA synchronous={level}")
+        # Read the recorded version BEFORE touching the database.  Previously
+        # the schema script ran first, so a database at an unknown version had
+        # tables created in it and was only then refused — it failed closed, but
+        # not before writing.  Nothing is written now until the version is known
+        # to be one this build can serve.
+        stored = self._read_schema_version()
+        self.migrations_applied: list[str] = []
+
+        if stored is None:
+            # Fresh database.
+            self._conn.executescript(SCHEMA_SQL)
             self._conn.execute(
                 "INSERT INTO schema_meta(key, value) VALUES ('schema_version', ?)",
                 (SCHEMA_VERSION,),
             )
-        elif row["value"] != SCHEMA_VERSION:
+            return
+
+        steps = plan_migration(stored, SCHEMA_VERSION)
+        if steps is None:
             raise PersistenceConflict(
                 "schema version mismatch",
-                {"found": row["value"], "expected": SCHEMA_VERSION},
+                {"found": stored, "expected": SCHEMA_VERSION, "forward_path": False},
             )
+        if steps:
+            self.migrations_applied = apply_migration(self._conn, steps)
+        # Idempotent: every statement is IF NOT EXISTS, so this adds nothing to
+        # an already-current database and completes a partially-created one.
+        self._conn.executescript(SCHEMA_SQL)
+
+    def _read_schema_version(self) -> str | None:
+        """The recorded version, or None if this database has no schema yet."""
+        conn = self._conn
+        assert conn is not None
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_meta'"
+        ).fetchone()
+        if exists is None:
+            return None
+        row = conn.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+        return None if row is None else str(row["value"])
 
     def close(self) -> None:
         if self._conn is not None:
@@ -418,6 +469,121 @@ class SqliteStore:
             ev.sequence = r["sequence"]
             out.append(ev)
         return out
+
+    # --- decision packets and execution plans --------------------------------
+    def save_decision_packet(
+        self, mission_id: str, packet: dict[str, Any], *, created_at: str
+    ) -> dict[str, Any]:
+        """Persist the packet a plan was selected from.
+
+        Previously a packet existed only as loose JSON inside a step receipt, so
+        a plan's ``packet_id`` referred to nothing that could be resolved.
+        """
+        c = self._c()
+        packet_id = str(packet.get("packet_id") or "")
+        if not packet_id:
+            raise PersistenceConflict("decision packet requires a packet_id", {})
+        self._require_logged_object(mission_id, "plan_compiled", "decision_packet", dict(packet))
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            ex = c.execute(
+                "SELECT body_json FROM decision_packets WHERE packet_id=?", (packet_id,)
+            ).fetchone()
+            if ex:
+                c.execute("COMMIT")
+                return json.loads(ex["body_json"])
+            c.execute(
+                """INSERT INTO decision_packets(packet_id, mission_id, body_json, receipt_hash, created_at)
+                   VALUES (?,?,?,?,?)""",
+                (packet_id, mission_id, to_canonical(dict(packet)),
+                 str(packet.get("receipt_hash") or ""), created_at),
+            )
+            c.execute("COMMIT")
+            return dict(packet)
+        except sqlite3.IntegrityError as e:
+            try:
+                c.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise PersistenceConflict("decision packet conflict", {"error": str(e)}) from e
+
+    def get_decision_packet(self, packet_id: str) -> dict[str, Any] | None:
+        row = self._c().execute(
+            "SELECT body_json FROM decision_packets WHERE packet_id=?", (packet_id,)
+        ).fetchone()
+        return json.loads(row["body_json"]) if row else None
+
+    def save_plan(self, plan_record: dict[str, Any]) -> dict[str, Any]:
+        """Persist an immutable, versioned, mission-bound execution plan.
+
+        The plan body stays content-addressed and immutable; what this adds is
+        the binding the plan object never carried — mission, packet, authority,
+        evidence — and the lineage (``plan_version`` / ``supersedes``) needed to
+        replan without losing what was superseded.
+        """
+        c = self._c()
+        mission_id = str(plan_record["mission_id"])
+        plan_id = str(plan_record["plan_id"])
+        self._require_logged_object(mission_id, "plan_compiled", "plan", dict(plan_record))
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            ex = c.execute("SELECT body_json FROM plans WHERE plan_id=?", (plan_id,)).fetchone()
+            if ex:
+                c.execute("COMMIT")
+                return json.loads(ex["body_json"])
+            c.execute(
+                """INSERT INTO plans(
+                    plan_id, mission_id, packet_id, plan_version, supersedes, strategy_id,
+                    body_json, plan_receipt, authority_binding_json, evidence_refs_json, created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    plan_id,
+                    mission_id,
+                    plan_record.get("packet_id"),
+                    int(plan_record["plan_version"]),
+                    plan_record.get("supersedes"),
+                    str(plan_record.get("strategy_id") or ""),
+                    to_canonical(dict(plan_record)),
+                    str(plan_record.get("plan_receipt") or ""),
+                    to_canonical(dict(plan_record.get("authority_binding") or {})),
+                    to_canonical(list(plan_record.get("evidence_refs") or [])),
+                    str(plan_record["created_at"]),
+                ),
+            )
+            c.execute("COMMIT")
+            return dict(plan_record)
+        except sqlite3.IntegrityError as e:
+            try:
+                c.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise PersistenceConflict(
+                "plan conflict", {"error": str(e), "plan_id": plan_id}
+            ) from e
+
+    def get_plan(self, plan_id: str) -> dict[str, Any] | None:
+        row = self._c().execute("SELECT body_json FROM plans WHERE plan_id=?", (plan_id,)).fetchone()
+        return json.loads(row["body_json"]) if row else None
+
+    def list_plans(self, mission_id: str) -> list[dict[str, Any]]:
+        rows = self._c().execute(
+            "SELECT body_json FROM plans WHERE mission_id=? ORDER BY plan_version ASC",
+            (mission_id,),
+        ).fetchall()
+        return [json.loads(r["body_json"]) for r in rows]
+
+    def latest_plan(self, mission_id: str) -> dict[str, Any] | None:
+        row = self._c().execute(
+            "SELECT body_json FROM plans WHERE mission_id=? ORDER BY plan_version DESC LIMIT 1",
+            (mission_id,),
+        ).fetchone()
+        return json.loads(row["body_json"]) if row else None
+
+    def next_plan_version(self, mission_id: str) -> int:
+        row = self._c().execute(
+            "SELECT MAX(plan_version) AS v FROM plans WHERE mission_id=?", (mission_id,)
+        ).fetchone()
+        return int((row["v"] or 0)) + 1
 
     def save_checkpoint(self, checkpoint: Checkpoint) -> Checkpoint:
         c = self._c()

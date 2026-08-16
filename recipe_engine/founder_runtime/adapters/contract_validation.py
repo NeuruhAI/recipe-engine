@@ -27,11 +27,32 @@ from recipe_engine.founder_runtime.errors import (
 
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-QDRANT_COLLECTION = "neuruh_vault_canon"
-QDRANT_POINT_BASELINE = 3049
+
+# --- CURRENT RATIFIED CANON (Gate B, 2026-08-16) -----------------------------
+# The previous pin (neuruh_vault_canon / 3049 points / manifest
+# vault-canon-remediated-20260718T054050Z-cct22) was retired in July: that
+# collection no longer exists, and the adapter correctly failed closed rather
+# than substituting a fixture.
+#
+# These constants ARE the ratified attestation, not a hopeful rename. Each was
+# re-proved live against the running service by scripts/qdrant_canon_ratify.py,
+# which scans every point rather than sampling, and gates relevance on
+# ground-truthed self-retrieval rather than an absolute cosine score (a random
+# hex string outscores a genuine canon question on this model, so a score
+# threshold proves nothing). QDRANT_ATTESTATION_IDENTITY_HASH is the SHA-256 of
+# the canonical identity block in that attestation, so a reader can recompute it
+# and see whether the live corpus still matches what was ratified.
+QDRANT_COLLECTION = "neuruh_canon_v20260816"
+QDRANT_POINT_BASELINE = 11756
+QDRANT_VECTOR_SIZE = 768
+QDRANT_DISTANCE = "Cosine"
+QDRANT_EMBEDDING_MODEL = "nomic-embed-text"
+QDRANT_SOURCE_TREE = "neuruh-vault"
+QDRANT_ATTESTATION_SCHEMA = "fr.qdrant_canon_attestation.v1"
+QDRANT_ATTESTATION_IDENTITY_HASH = (
+    "438900865717650c801cc3bc0245beaa3df24419d4dbde94673714b5dc8efe9d"
+)
 QDRANT_SCROLL_REQUEST = {"limit": 1, "with_payload": True, "with_vector": False}
-QDRANT_MANIFEST_ID = "vault-canon-remediated-20260718T054050Z-cct22"
-QDRANT_MANIFEST_SCHEMA = "neuruh.memory-source-manifest.v1"
 IAR_HEALTH_KEYS = frozenset(
     {"enabled", "active_backend", "active_model", "backends", "degraded_reason"}
 )
@@ -148,7 +169,9 @@ def validate_qdrant_verification(payload: Mapping[str, Any]) -> dict[str, Any]:
     value = _require_mapping(payload, "Qdrant verification")
     keys = {
         "collection", "endpoint_class", "server_identity", "container", "image",
-        "count_before", "count_after", "point_id_hash", "manifest_id", "manifest_hash",
+        "count_before", "count_after", "point_id_hash",
+        "vector_size", "distance", "embedding_model", "embedding_dim", "source_tree",
+        "attestation_identity_hash",
         "request_hashes", "response_hashes", "mutation_attempted",
     }
     _require_exact_keys(value, keys, "Qdrant verification")
@@ -160,13 +183,28 @@ def validate_qdrant_verification(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise QdrantCountChanged("Qdrant count changed during read-only verification", {})
     if value["mutation_attempted"] is not False:
         raise UnsafeCapability("Qdrant verification attempted mutation", {})
-    if value["manifest_id"] != QDRANT_MANIFEST_ID:
-        raise QdrantPayloadProvenanceMismatch("Qdrant manifest identity mismatch", {})
-    for key in ("point_id_hash", "manifest_hash"):
-        try:
-            _require_sha256(value[key], f"Qdrant {key}")
-        except ProvenanceInvalid as exc:
-            raise QdrantPayloadProvenanceMismatch("Qdrant point/manifest provenance is invalid", {}) from exc
+    # The retired pin bound provenance to a manifest_id the current corpus does
+    # not carry. Binding is now to the retrieval identity itself: the geometry
+    # the vectors were built in, the model that built them, and the tree they
+    # came from. A collection of the right name holding differently-embedded
+    # vectors would pass a name check and fail these.
+    if value["vector_size"] != QDRANT_VECTOR_SIZE:
+        raise QdrantPayloadProvenanceMismatch("Qdrant vector dimension mismatch", {})
+    if value["distance"] != QDRANT_DISTANCE:
+        raise QdrantPayloadProvenanceMismatch("Qdrant distance metric mismatch", {})
+    if value["embedding_model"] != QDRANT_EMBEDDING_MODEL:
+        raise QdrantPayloadProvenanceMismatch("Qdrant embedding model mismatch", {})
+    if value["embedding_dim"] != QDRANT_VECTOR_SIZE:
+        raise QdrantPayloadProvenanceMismatch(
+            "Qdrant payload-declared embedding dimension disagrees with the collection", {})
+    if value["source_tree"] != QDRANT_SOURCE_TREE:
+        raise QdrantPayloadProvenanceMismatch("Qdrant corpus source tree mismatch", {})
+    if value["attestation_identity_hash"] != QDRANT_ATTESTATION_IDENTITY_HASH:
+        raise QdrantPayloadProvenanceMismatch("Qdrant canon attestation identity mismatch", {})
+    try:
+        _require_sha256(value["point_id_hash"], "Qdrant point_id_hash")
+    except ProvenanceInvalid as exc:
+        raise QdrantPayloadProvenanceMismatch("Qdrant point provenance is invalid", {}) from exc
     if not isinstance(value["request_hashes"], list) or not isinstance(value["response_hashes"], list):
         raise MalformedResponse("Qdrant request/response hashes must be arrays", {})
     for digest in [*value["request_hashes"], *value["response_hashes"]]:

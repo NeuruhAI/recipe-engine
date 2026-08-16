@@ -1,15 +1,27 @@
 """Live Qdrant read-only adapter (P2-B) — GATED on host recovery.
 
-Targets ONLY the accepted loopback Qdrant service and the canonical collection
-``neuruh_vault_canon``.  Supports service health, collection identity, point
-count, bounded scroll/retrieval, returned-point provenance/hashes, and
-before/after count verification.  It absolutely never upserts, deletes, creates
-or deletes a collection, mutates a payload, or deletes a snapshot.
+Targets ONLY the accepted loopback Qdrant service and the ratified canonical
+collection (see ``QDRANT_COLLECTION``).  Supports service health, collection
+identity, point count, bounded scroll/retrieval, returned-point
+provenance/hashes, and before/after count verification.  It absolutely never
+upserts, deletes, creates or deletes a collection, mutates a payload, or deletes
+a snapshot.
 
-HOST DEPENDENCY: the live activation gate does not run until a sealed GREEN host
-recovery audit exists.  Until then every live operation returns DENIED
-(``error_code=DEPENDENCY_UNHEALTHY``) WITHOUT contacting Qdrant — and never a
-fixture substitute.
+Two independent gates, deliberately not conflated:
+
+  HOST DEPENDENCY — the live activation gate does not run until a sealed GREEN
+  host-recovery audit exists, proving the Colima/Qdrant host recovered without
+  data loss.  That audit describes the collection extant at the time of the
+  recovery, which is a historical fact and not the current canon.  Until the
+  gate opens, every live operation returns DENIED
+  (``error_code=DEPENDENCY_UNHEALTHY``) WITHOUT contacting Qdrant — and never a
+  fixture substitute.
+
+  CANON IDENTITY — once the gate is open, the corpus itself must match the
+  ratified attestation: collection, exact point count before and after, vector
+  dimension and distance metric, and the embedding model, declared dimension and
+  source tree read from the points' own payloads.  A collection answering to the
+  right name but re-embedded with a different model fails here.
 """
 
 from __future__ import annotations
@@ -18,8 +30,8 @@ import time
 from typing import Any
 
 from recipe_engine.founder_runtime.adapters.contract_validation import (
+    QDRANT_ATTESTATION_IDENTITY_HASH,
     QDRANT_COLLECTION,
-    QDRANT_MANIFEST_ID,
     QDRANT_POINT_BASELINE,
     validate_qdrant_verification,
 )
@@ -66,10 +78,19 @@ class LiveQdrantAdapter(LiveAdapterBase):
         self._http = http or LoopbackHttpClient(settings.endpoint_map())
         # The gate is pinned to two fixed allowlisted root NAMES under an audit
         # base (default: the workspace).  A caller cannot inject an arbitrary root.
+        #
+        # It is parameterised with the HOST-RECOVERY assertion, not the current
+        # canon. These are two different questions that were previously
+        # conflated: the gate asks "did the Colima/Qdrant host recover cleanly",
+        # answered by a sealed audit describing the collection extant at the time
+        # of that recovery; the canon pin asks "is this the ratified current
+        # corpus", answered by the attestation and enforced in _live_verify.
+        # Driving the gate from the canon pin would have demanded a host-recovery
+        # audit for a collection that no host recovery has ever covered.
         self._gate = gate or HostRecoveryGate(
             settings.host_recovery_audit_base,
-            required_count=settings.qdrant_point_baseline,
-            collection=settings.qdrant_collection,
+            required_count=settings.host_recovery_point_count,
+            collection=settings.host_recovery_collection,
         )
         self._collection = settings.qdrant_collection
 
@@ -109,13 +130,16 @@ class LiveQdrantAdapter(LiveAdapterBase):
         if isinstance(root_json, dict):
             server_identity = str(root_json.get("version") or root_json.get("title") or "qdrant")
 
-        # collection identity
+        # collection identity, including the geometry the vectors live in
         col_resp = self._http.request(_SERVICE, f"/collections/{col}", timeout_ms=timeout, method="GET")
         col_json = col_resp.json()
         _record({"op": "collection", "collection": col}, col_json)
         result = col_json.get("result", {}) if isinstance(col_json, dict) else {}
         if result.get("status") not in ("green", "yellow"):
             raise TransportMalformed("qdrant collection not healthy")
+        vectors_cfg = (((result.get("config") or {}).get("params") or {}).get("vectors") or {})
+        vector_size = vectors_cfg.get("size")
+        distance = vectors_cfg.get("distance")
 
         # exact count BEFORE
         count_spec = {"exact": True}
@@ -132,15 +156,19 @@ class LiveQdrantAdapter(LiveAdapterBase):
         points = ((sc_json or {}).get("result") or {}).get("points") or []
         point_ids = sorted(str(p.get("id")) for p in points if isinstance(p, dict))
         point_id_hash = hash_payload(point_ids)
-        manifest_id = ""
-        for p in points:
-            payload = p.get("payload") if isinstance(p, dict) else None
-            if isinstance(payload, dict) and payload.get("manifest_id"):
-                manifest_id = str(payload["manifest_id"])
-                break
-        if not manifest_id:
-            manifest_id = QDRANT_MANIFEST_ID  # canon manifest binding
-        manifest_hash = hash_payload({"manifest_id": manifest_id, "points": point_ids})
+
+        # Retrieval provenance read from the corpus itself, not asserted. Every
+        # point records the model and dimension it was embedded with and the
+        # tree it came from; a collection re-embedded with a different model
+        # would still answer to the same name but fail here.
+        observed = next(
+            (p.get("payload") for p in points
+             if isinstance(p, dict) and isinstance(p.get("payload"), dict)),
+            {},
+        )
+        embedding_model = str(observed.get("embedding_model") or "")
+        embedding_dim = observed.get("embedding_dim")
+        source_tree = str(observed.get("source_tree") or "")
 
         # exact count AFTER (scroll must not change anything)
         ca = self._http.request(_SERVICE, f"/collections/{col}/points/count", timeout_ms=timeout, method="POST", json_body=count_spec)
@@ -153,12 +181,18 @@ class LiveQdrantAdapter(LiveAdapterBase):
             "endpoint_class": self.endpoint_class,
             "server_identity": server_identity or "qdrant",
             "container": "neuruh-qdrant",
-            "image": "qdrant/qdrant:v1.13.2",
+            # Observed, not a stale literal: the previous value claimed
+            # qdrant/qdrant:v1.13.2 regardless of what was actually answering.
+            "image": f"qdrant/qdrant:v{server_identity}" if server_identity else "qdrant/qdrant",
             "count_before": count_before,
             "count_after": count_after,
             "point_id_hash": point_id_hash,
-            "manifest_id": manifest_id,
-            "manifest_hash": manifest_hash,
+            "vector_size": vector_size,
+            "distance": distance,
+            "embedding_model": embedding_model,
+            "embedding_dim": embedding_dim,
+            "source_tree": source_tree,
+            "attestation_identity_hash": QDRANT_ATTESTATION_IDENTITY_HASH,
             "request_hashes": req_hashes,
             "response_hashes": resp_hashes,
             "mutation_attempted": False,
