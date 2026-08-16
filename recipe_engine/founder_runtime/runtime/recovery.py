@@ -9,7 +9,10 @@ from recipe_engine.founder_runtime.errors import SideEffectUncertain
 from recipe_engine.founder_runtime.events.replay import replay_mission
 from recipe_engine.founder_runtime.ids import hash_payload
 from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
-from recipe_engine.founder_runtime.evidence.validation import validate_receipt
+from recipe_engine.founder_runtime.evidence.validation import (
+    validate_live_receipt,
+    validate_receipt,
+)
 
 
 class RecoveryStatus(str, Enum):
@@ -173,14 +176,27 @@ def recover_mission(store, mission_id: str, *, clock_now: str) -> dict[str, Any]
         expected_plan = r.plan_id if (bound_plans and r.plan_id in bound_plans) else (
             mission.plan_id or r.plan_id if not bound_plans else sorted(bound_plans)[0]
         )
-        errs = validate_receipt(
-            r,
-            expected_mission_id=mission_id,
-            expected_plan_id=expected_plan,
-            expected_step_id=r.step_id,
-            expected_input_hash=None,
-            require_authority=True,
-        )
+        # Validate against the trust class the receipt declares.  Routing every
+        # receipt through the fixture validator made recovery of any live
+        # mission report invalid_receipt: a live receipt cannot carry a
+        # fixture_gov authority reference or evidence_class=="fixture".
+        if r.evidence_class == "live_observed":
+            errs = validate_live_receipt(
+                r,
+                expected_mission_id=mission_id,
+                expected_plan_id=expected_plan,
+                expected_step_id=r.step_id,
+                expected_input_hash=None,
+            )
+        else:
+            errs = validate_receipt(
+                r,
+                expected_mission_id=mission_id,
+                expected_plan_id=expected_plan,
+                expected_step_id=r.step_id,
+                expected_input_hash=None,
+                require_authority=True,
+            )
         if errs:
             return {
                 "status": RecoveryStatus.INVALID_RECEIPT.value,

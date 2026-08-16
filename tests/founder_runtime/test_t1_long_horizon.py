@@ -358,6 +358,32 @@ class LiveReceiptValidationTests(unittest.TestCase):
         r = self._receipt(capability="live.file_write")
         self.assertIn("unsafe_live_capability", self._errs(r))
 
+    def test_recovery_accepts_a_mission_whose_receipts_are_live(self):
+        """Recovery routed every receipt through the fixture validator.
+
+        A live mission therefore recovered as invalid_receipt — its receipts
+        cannot carry a fixture_gov authority reference or fixture trust markers.
+        """
+        path = _tmp_db()
+        rt = _runtime(path)
+        try:
+            m = rt.create_mission_from_text("status organism", creation_idempotency_key="t1-live-rec")
+            mid = m.mission_id
+            rt.transition(mid, MissionState.INTAKE, reason="in")
+            rt.transition(mid, MissionState.CONTEXT_RESOLUTION, reason="ctx")
+            rt.transition(mid, MissionState.PLANNING, reason="plan")
+            rt.bind_plan_id(mid, "plan_live_1")
+            rt.transition(mid, MissionState.QUEUED, reason="q")
+            rt.transition(mid, MissionState.EXECUTING, reason="x")
+            rt.record_receipt(self._receipt(
+                receipt_id="rcpt_live_rec", mission_id=mid, plan_id="plan_live_1",
+                step_id="observe", idempotency_key=f"live_step:{mid}:plan_live_1:observe",
+            ))
+            rec = rt.recover(mid)
+        finally:
+            rt.close()
+        self.assertEqual(rec["status"], RecoveryStatus.SAFE_TO_RESUME.value)
+
 
 if __name__ == "__main__":
     unittest.main()
