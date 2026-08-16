@@ -23,7 +23,10 @@ from recipe_engine.founder_runtime.adapters.contract_validation import (
     AXON_CONTAINMENT_CODES,
     IAR_HEALTH_KEYS,
     QDRANT_COLLECTION,
-    QDRANT_MANIFEST_ID,
+    QDRANT_ATTESTATION_IDENTITY_HASH,
+    QDRANT_EMBEDDING_MODEL,
+    QDRANT_SOURCE_TREE,
+    QDRANT_VECTOR_SIZE,
     QDRANT_POINT_BASELINE,
     QDRANT_SCROLL_REQUEST,
     validate_aegis_world,
@@ -463,17 +466,22 @@ class PureResponseValidatorTests(unittest.TestCase):
             "endpoint_class": "loopback",
             "server_identity": "qdrant",
             "container": "neuruh-qdrant",
-            "image": "qdrant/qdrant:v1.13.2",
+            "image": "qdrant/qdrant:v1.19.0",
             "count_before": QDRANT_POINT_BASELINE,
             "count_after": QDRANT_POINT_BASELINE,
             "point_id_hash": SHA,
-            "manifest_id": QDRANT_MANIFEST_ID,
-            "manifest_hash": SHA,
+            "vector_size": QDRANT_VECTOR_SIZE,
+            "distance": "Cosine",
+            "embedding_model": QDRANT_EMBEDDING_MODEL,
+            "embedding_dim": QDRANT_VECTOR_SIZE,
+            "source_tree": QDRANT_SOURCE_TREE,
+            "attestation_identity_hash": QDRANT_ATTESTATION_IDENTITY_HASH,
             "request_hashes": [SHA],
             "response_hashes": [SHA],
             "mutation_attempted": False,
         }
-        self.assertEqual(validate_qdrant_verification(payload)["count_after"], 3049)
+        self.assertEqual(
+            validate_qdrant_verification(payload)["count_after"], QDRANT_POINT_BASELINE)
         payload["count_after"] += 1
         with self.assertRaises(QdrantCountChanged):
             validate_qdrant_verification(payload)
