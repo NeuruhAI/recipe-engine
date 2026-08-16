@@ -26,6 +26,7 @@ from recipe_engine.founder_runtime.contracts.completion import CompletionReport
 from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
 from recipe_engine.founder_runtime.state.state_machine import StateMachine
 from recipe_engine.founder_runtime.intent.compiler import compile_intent_to_mission
+from recipe_engine.founder_runtime.intent.constraints import AuthorityEnvelope
 from recipe_engine.founder_runtime.events.replay import replay_mission
 from recipe_engine.founder_runtime.runtime.locks import LockManager, WorkerLeaseManager, default_worker_id
 from recipe_engine.founder_runtime.runtime.checkpoints import make_checkpoint
@@ -75,12 +76,14 @@ class MissionRuntime:
         request_text: str,
         *,
         creation_idempotency_key: str = "",
+        envelope: AuthorityEnvelope = AuthorityEnvelope.READ_ONLY_FIXTURE,
     ) -> Mission:
         now = self.clock.now_iso()
         mission, interpretation = compile_intent_to_mission(
             request_text,
             clock_now=now,
             creation_idempotency_key=creation_idempotency_key,
+            envelope=envelope,
         )
         creation_event = self._event(
             mission, prior=None, next_state=mission.current_state,
@@ -306,6 +309,84 @@ class MissionRuntime:
         self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
         return self.get_mission(mission_id)
 
+    def commit_plan(
+        self,
+        mission_id: str,
+        *,
+        plan: dict[str, Any],
+        packet: dict[str, Any],
+        strategy_id: str,
+        authority_binding: dict[str, Any],
+        evidence_refs: list[str],
+        supersedes: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist a decision packet and the plan compiled from it, and bind it.
+
+        This closes four gaps at once.  A plan used to exist only as loose JSON
+        inside a step receipt: it could not be retrieved, diffed or superseded;
+        its ``packet_id`` pointed at nothing storable; it carried no mission_id;
+        and the mission's ``plan_id`` was an independently minted string that
+        never equalled the compiled plan's own id, so the mission was bound to a
+        plan no compiled plan had.
+
+        The plan body stays immutable and content-addressed.  What is added is
+        the binding (mission, packet, authority, evidence) and the lineage
+        (``plan_version``, ``supersedes``) that replanning needs.
+        """
+        mission = self.get_mission(mission_id)
+        if mission.current_state in TERMINAL_STATES:
+            raise StateTransitionInvalid("terminal mission cannot compile a plan", {})
+
+        plan_id = str(plan.get("plan_id") or "")
+        if not plan_id:
+            raise MissionSchemaInvalid("compiled plan has no plan_id", {})
+
+        # Committing the same plan twice is a no-op, not a new version.  A plan
+        # is immutable and content-addressed, so re-committing it must return
+        # what is stored rather than mint a second version whose event would
+        # collide with the first on the same idempotency key.
+        existing = self.store.get_plan(plan_id)
+        if existing is not None:
+            if existing.get("mission_id") != mission_id:
+                raise PersistenceConflict(
+                    "plan id belongs to a different mission",
+                    {"plan_id": plan_id, "owner": existing.get("mission_id")},
+                )
+            self.bind_plan_id(mission_id, plan_id)
+            return existing
+
+        version = self.store.next_plan_version(mission_id)
+        record = {
+            "schema_version": "fr.plan_record.v1",
+            "plan_id": plan_id,
+            "mission_id": mission_id,
+            "packet_id": str(packet.get("packet_id") or "") or None,
+            "plan_version": version,
+            "supersedes": supersedes,
+            "strategy_id": strategy_id,
+            "plan": dict(plan),
+            "plan_receipt": str(plan.get("plan_receipt") or ""),
+            "authority_binding": dict(authority_binding),
+            "evidence_refs": list(evidence_refs),
+            "created_at": self.clock.now_iso(),
+        }
+
+        # One event carries both objects, so persistence can require each of
+        # them to have been logged before it will store them.
+        self._record_same_state_event(
+            mission_id,
+            EventType.PLAN_COMPILED,
+            "plan_compiled",
+            {"plan": record, "decision_packet": dict(packet), "plan_version": version},
+            f"plan_compiled:{mission_id}:{plan_id}",
+            evidence_refs=list(evidence_refs),
+        )
+        self.store.save_decision_packet(mission_id, dict(packet), created_at=record["created_at"])
+        stored = self.store.save_plan(record)
+        self.bind_plan_id(mission_id, plan_id)
+        self.metrics.inc("plans_committed")
+        return stored
+
     def record_approval(self, approval: Approval) -> Approval:
         now = self.clock.now_iso()
         validate_approval_record(approval, now_iso=now)
@@ -464,12 +545,29 @@ class MissionRuntime:
         return self.get_mission(mission_id)
 
     def record_receipt(self, receipt: ExecutionReceipt) -> ExecutionReceipt:
-        from recipe_engine.founder_runtime.evidence.validation import assert_valid_receipt
-        assert_valid_receipt(
-            receipt, expected_mission_id=receipt.mission_id,
-            expected_plan_id=receipt.plan_id, expected_step_id=receipt.step_id,
-            expected_input_hash=receipt.input_hash, expected_output=receipt.outcome_data,
+        from recipe_engine.founder_runtime.evidence.validation import (
+            assert_valid_live_receipt,
+            assert_valid_receipt,
         )
+        # Validate against the trust class the receipt itself declares.  The
+        # fixture validator requires evidence_class=="fixture" and a fixture_gov
+        # authority reference, so routing every receipt through it made a live
+        # receipt unrecordable — the live path could not produce evidence at all.
+        # Dispatching does not loosen either validator: a receipt claiming
+        # fixture trust still faces every fixture check, and one claiming live
+        # trust faces the live equivalents including "never mutation_authorized".
+        if receipt.evidence_class == "live_observed":
+            assert_valid_live_receipt(
+                receipt, expected_mission_id=receipt.mission_id,
+                expected_plan_id=receipt.plan_id, expected_step_id=receipt.step_id,
+                expected_input_hash=receipt.input_hash, expected_output=receipt.outcome_data,
+            )
+        else:
+            assert_valid_receipt(
+                receipt, expected_mission_id=receipt.mission_id,
+                expected_plan_id=receipt.plan_id, expected_step_id=receipt.step_id,
+                expected_input_hash=receipt.input_hash, expected_output=receipt.outcome_data,
+            )
         existing = self.store.get_receipt(receipt.receipt_id)
         if existing is not None:
             if existing.to_dict() != receipt.to_dict():
@@ -540,11 +638,24 @@ class MissionRuntime:
             "deliverable_hash": expected_deliverables,
             "mutation": False,
         })
+        # The outcome must declare the trust class of the evidence it actually
+        # reconciles.  This was pinned to the literal "fixture", which both
+        # blocked any live outcome and was weaker than it looked: it asserted a
+        # constant rather than checking that the declared class matched the
+        # stored receipts.  Deriving it means an outcome cannot claim fixture
+        # provenance over live evidence, or the reverse.
+        receipt_classes = {r.evidence_class for r in receipts}
+        if not receipt_classes:
+            expected_evidence_class = "fixture"
+        elif len(receipt_classes) == 1:
+            expected_evidence_class = next(iter(receipt_classes))
+        else:
+            expected_evidence_class = "mixed"
         if (
             sorted(outcome.get("receipt_hashes") or []) != expected_receipts
             or outcome.get("deliverable_hash") != expected_deliverables
             or outcome.get("result_hash") != expected_result
-            or outcome.get("evidence_class") != "fixture"
+            or outcome.get("evidence_class") != expected_evidence_class
             or outcome.get("mutation_authorized") is not False
         ):
             raise MissionSchemaInvalid("outcome does not reconcile stored evidence", {})

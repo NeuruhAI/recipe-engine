@@ -440,6 +440,121 @@ class SqliteStore:
             out.append(ev)
         return out
 
+    # --- decision packets and execution plans --------------------------------
+    def save_decision_packet(
+        self, mission_id: str, packet: dict[str, Any], *, created_at: str
+    ) -> dict[str, Any]:
+        """Persist the packet a plan was selected from.
+
+        Previously a packet existed only as loose JSON inside a step receipt, so
+        a plan's ``packet_id`` referred to nothing that could be resolved.
+        """
+        c = self._c()
+        packet_id = str(packet.get("packet_id") or "")
+        if not packet_id:
+            raise PersistenceConflict("decision packet requires a packet_id", {})
+        self._require_logged_object(mission_id, "plan_compiled", "decision_packet", dict(packet))
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            ex = c.execute(
+                "SELECT body_json FROM decision_packets WHERE packet_id=?", (packet_id,)
+            ).fetchone()
+            if ex:
+                c.execute("COMMIT")
+                return json.loads(ex["body_json"])
+            c.execute(
+                """INSERT INTO decision_packets(packet_id, mission_id, body_json, receipt_hash, created_at)
+                   VALUES (?,?,?,?,?)""",
+                (packet_id, mission_id, to_canonical(dict(packet)),
+                 str(packet.get("receipt_hash") or ""), created_at),
+            )
+            c.execute("COMMIT")
+            return dict(packet)
+        except sqlite3.IntegrityError as e:
+            try:
+                c.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise PersistenceConflict("decision packet conflict", {"error": str(e)}) from e
+
+    def get_decision_packet(self, packet_id: str) -> dict[str, Any] | None:
+        row = self._c().execute(
+            "SELECT body_json FROM decision_packets WHERE packet_id=?", (packet_id,)
+        ).fetchone()
+        return json.loads(row["body_json"]) if row else None
+
+    def save_plan(self, plan_record: dict[str, Any]) -> dict[str, Any]:
+        """Persist an immutable, versioned, mission-bound execution plan.
+
+        The plan body stays content-addressed and immutable; what this adds is
+        the binding the plan object never carried — mission, packet, authority,
+        evidence — and the lineage (``plan_version`` / ``supersedes``) needed to
+        replan without losing what was superseded.
+        """
+        c = self._c()
+        mission_id = str(plan_record["mission_id"])
+        plan_id = str(plan_record["plan_id"])
+        self._require_logged_object(mission_id, "plan_compiled", "plan", dict(plan_record))
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            ex = c.execute("SELECT body_json FROM plans WHERE plan_id=?", (plan_id,)).fetchone()
+            if ex:
+                c.execute("COMMIT")
+                return json.loads(ex["body_json"])
+            c.execute(
+                """INSERT INTO plans(
+                    plan_id, mission_id, packet_id, plan_version, supersedes, strategy_id,
+                    body_json, plan_receipt, authority_binding_json, evidence_refs_json, created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    plan_id,
+                    mission_id,
+                    plan_record.get("packet_id"),
+                    int(plan_record["plan_version"]),
+                    plan_record.get("supersedes"),
+                    str(plan_record.get("strategy_id") or ""),
+                    to_canonical(dict(plan_record)),
+                    str(plan_record.get("plan_receipt") or ""),
+                    to_canonical(dict(plan_record.get("authority_binding") or {})),
+                    to_canonical(list(plan_record.get("evidence_refs") or [])),
+                    str(plan_record["created_at"]),
+                ),
+            )
+            c.execute("COMMIT")
+            return dict(plan_record)
+        except sqlite3.IntegrityError as e:
+            try:
+                c.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise PersistenceConflict(
+                "plan conflict", {"error": str(e), "plan_id": plan_id}
+            ) from e
+
+    def get_plan(self, plan_id: str) -> dict[str, Any] | None:
+        row = self._c().execute("SELECT body_json FROM plans WHERE plan_id=?", (plan_id,)).fetchone()
+        return json.loads(row["body_json"]) if row else None
+
+    def list_plans(self, mission_id: str) -> list[dict[str, Any]]:
+        rows = self._c().execute(
+            "SELECT body_json FROM plans WHERE mission_id=? ORDER BY plan_version ASC",
+            (mission_id,),
+        ).fetchall()
+        return [json.loads(r["body_json"]) for r in rows]
+
+    def latest_plan(self, mission_id: str) -> dict[str, Any] | None:
+        row = self._c().execute(
+            "SELECT body_json FROM plans WHERE mission_id=? ORDER BY plan_version DESC LIMIT 1",
+            (mission_id,),
+        ).fetchone()
+        return json.loads(row["body_json"]) if row else None
+
+    def next_plan_version(self, mission_id: str) -> int:
+        row = self._c().execute(
+            "SELECT MAX(plan_version) AS v FROM plans WHERE mission_id=?", (mission_id,)
+        ).fetchone()
+        return int((row["v"] or 0)) + 1
+
     def save_checkpoint(self, checkpoint: Checkpoint) -> Checkpoint:
         c = self._c()
         self._require_logged_object(checkpoint.mission_id, "checkpoint_recorded", "checkpoint", checkpoint.to_dict())

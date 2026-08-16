@@ -286,21 +286,34 @@ class LiveAxonReadonlyAdapter(LiveAdapterBase):
         result = self.identity(meta)
         if result.status != AdapterResultStatus.SUCCESS.value:
             raise AdapterUnavailable("AXON read-only surface unavailable for governed step", {"status": result.status})
-        output = {"axon_identity": result.payload, "mutation": False}
+        # Protocol parity with FixtureAxon.execute_readonly_step, which carries
+        # the caller's outcome_data.  Discarding it here silently dropped the
+        # step's own evidence from every live receipt, leaving the receipt
+        # attesting only that AXON was reachable — so a live mission could not
+        # resume from its own receipts.  The AXON identity is retained alongside
+        # as the corroboration that the read-only surface answered.
+        output = dict(kwargs.get("outcome_data") or {})
+        output["axon_identity"] = result.payload
+        output["mutation"] = False
+        capability = str(kwargs.get("capability") or "axon.identity")
+        output_hash = hash_payload(output)
         receipt = ExecutionReceipt(
             schema_version=SCHEMA_RECEIPT,
             receipt_id=stable_id("live_rcpt", mission_id, plan_id, step_id, input_hash),
             mission_id=mission_id, plan_id=plan_id, step_id=step_id,
-            executor="live_axon", capability=str(kwargs.get("capability") or "axon.identity"),
+            executor="live_axon", capability=capability,
             started_at=started_at, ended_at=ended_at, status=ReceiptStatus.SUCCESS,
-            input_hash=input_hash, output_hash=hash_payload(output),
+            input_hash=input_hash, output_hash=output_hash,
             repository_metadata={"mode": "live", "mutation": False},
             files_changed=[], tests=[TestResult(name="axon_readonly_identity", passed=True)],
             artifacts=[], error=None,
             authority_reference=str(kwargs.get("authority_reference") or "not_claimed_by_governance"),
             idempotency_key=f"live_step:{mission_id}:{plan_id}:{step_id}",
             evidence_class="live_observed", trust_level="live_observed", producer_identity="live_axon",
-            action_binding=f"axon.identity:{input_hash}:{hash_payload(output)}",
+            # Bind to the capability actually exercised, not a fixed literal: a
+            # step declaring a different capability produced a receipt whose
+            # action_binding described an operation it had not performed.
+            action_binding=f"{capability}:{input_hash}:{output_hash}",
             outcome_data=output, mutation_authorized=False,
         )
         receipt.compute_hash()

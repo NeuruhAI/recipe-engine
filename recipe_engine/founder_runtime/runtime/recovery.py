@@ -82,6 +82,31 @@ def verify_checkpoint(store, ckpt, mission) -> list[str]:
     return issues
 
 
+def _bound_plan_ids(store, mission) -> set[str]:
+    """Every plan id this mission has ever been bound to.
+
+    Sources are both durable and independent: the ``PLAN_BOUND`` events in the
+    hash chain, and the persisted plan lineage.  An empty set means the mission
+    predates plan persistence and was never bound, in which case there is
+    nothing to bind a receipt against.
+    """
+    bound: set[str] = set()
+    if mission.plan_id:
+        bound.add(mission.plan_id)
+    for ev in store.list_events(mission.mission_id):
+        payload = getattr(ev, "payload", None) or {}
+        plan_id = payload.get("plan_id")
+        if isinstance(plan_id, str) and plan_id:
+            bound.add(plan_id)
+    try:
+        for record in store.list_plans(mission.mission_id):
+            if record.get("plan_id"):
+                bound.add(str(record["plan_id"]))
+    except Exception:  # noqa: BLE001 — a store without the plans table still recovers
+        pass
+    return bound
+
+
 def _logged_checkpoint(store, ckpt) -> dict[str, Any] | None:
     """The copy of this checkpoint carried by its hash-chained event, if any."""
     for ev in store.list_events(ckpt.mission_id):
@@ -137,15 +162,21 @@ def recover_mission(store, mission_id: str, *, clock_now: str) -> dict[str, Any]
             }
 
     receipts = store.list_receipts(mission_id)
+    bound_plans = _bound_plan_ids(store, mission)
     for r in receipts:
+        # Bind against the plans this mission actually had, not the receipt's own
+        # copy of its plan_id.  Passing r.plan_id compared the receipt to itself,
+        # so the plan-binding check could never fire and a receipt carrying a
+        # foreign plan_id passed recovery unchallenged.  The set rather than the
+        # current plan_id, because a mission that replanned legitimately holds
+        # receipts issued under a plan that has since been superseded.
+        expected_plan = r.plan_id if (bound_plans and r.plan_id in bound_plans) else (
+            mission.plan_id or r.plan_id if not bound_plans else sorted(bound_plans)[0]
+        )
         errs = validate_receipt(
             r,
             expected_mission_id=mission_id,
-            # Bind against the mission's own plan, not the receipt's copy of it.
-            # Passing r.plan_id compared the receipt to itself, so the plan-binding
-            # check could never fire and a receipt carrying a foreign plan_id
-            # passed recovery unchallenged.
-            expected_plan_id=mission.plan_id or r.plan_id,
+            expected_plan_id=expected_plan,
             expected_step_id=r.step_id,
             expected_input_hash=None,
             require_authority=True,

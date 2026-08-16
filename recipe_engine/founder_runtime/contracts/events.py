@@ -50,6 +50,9 @@ SAME_STATE_EVENT_TYPES: frozenset[EventType] = frozenset({
     EventType.APPROVAL_CONSUMED,
     EventType.DELIVERABLE_STATUS_CHANGED,
     EventType.PLAN_BOUND,
+    # Compiling a plan records new mission body material without changing state;
+    # the state change, if any, is a separate transition.
+    EventType.PLAN_COMPILED,
     EventType.RECEIPT_RECORDED,
     EventType.CHECKPOINT_RECORDED,
     EventType.ARTIFACT_REGISTERED,

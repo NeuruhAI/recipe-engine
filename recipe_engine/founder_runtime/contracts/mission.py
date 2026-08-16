@@ -11,9 +11,15 @@ from recipe_engine.founder_runtime.state.states import MissionState
 from .authority import AuthorityRequirement, AuthorityClass
 
 
-SCHEMA_MISSION = "fr.mission.v1"
+SCHEMA_MISSION = "fr.mission.v2"
 SCHEMA_PRINCIPAL = "fr.principal.v1"
 SCHEMA_DELIVERABLE = "fr.deliverable.v1"
+
+# Mission contract v2 adds the Phase-4 fields absent from v1: non_goals, world,
+# domain, time_budget, resource_budget, required_evidence and approval_gates.
+# v1 rows remain loadable — every added field defaults, and validate_mission_dict
+# accepts any "fr.mission" schema prefix.
+SCHEMA_MISSION_V1 = "fr.mission.v1"
 
 
 class MissionClass(str, Enum):
@@ -157,6 +163,14 @@ class Mission:
     input_hash: str = ""
     creation_idempotency_key: str = ""
     plan_id: str | None = None
+    # --- mission contract v2 (Phase 4) ---
+    non_goals: list[str] = field(default_factory=list)
+    world: str = ""
+    domain: str = ""
+    time_budget: str | None = None
+    resource_budget: dict[str, Any] = field(default_factory=dict)
+    required_evidence: list[str] = field(default_factory=list)
+    approval_gates: list[str] = field(default_factory=list)
     extensions: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -186,6 +200,13 @@ class Mission:
             "input_hash": self.input_hash,
             "creation_idempotency_key": self.creation_idempotency_key,
             "plan_id": self.plan_id,
+            "non_goals": list(self.non_goals),
+            "world": self.world,
+            "domain": self.domain,
+            "time_budget": self.time_budget,
+            "resource_budget": dict(self.resource_budget),
+            "required_evidence": list(self.required_evidence),
+            "approval_gates": list(self.approval_gates),
             "extensions": dict(self.extensions),
         }
 
@@ -198,6 +219,16 @@ class Mission:
             "desired_outcome": self.desired_outcome,
             "constraints": list(self.constraints),
             "completion_rule": self.completion_rule,
+            # v2 identity material: two missions that differ only in what they
+            # refuse to do, where they run, or what they may spend are NOT the
+            # same mission and must not collide on input_hash.
+            "non_goals": list(self.non_goals),
+            "world": self.world,
+            "domain": self.domain,
+            "time_budget": self.time_budget,
+            "resource_budget": dict(self.resource_budget),
+            "required_evidence": list(self.required_evidence),
+            "approval_gates": list(self.approval_gates),
         }
         self.input_hash = hash_payload(payload)
         return self.input_hash
@@ -230,6 +261,13 @@ class Mission:
             input_hash=str(d.get("input_hash") or ""),
             creation_idempotency_key=str(d.get("creation_idempotency_key") or ""),
             plan_id=d.get("plan_id"),
+            non_goals=list(d.get("non_goals") or []),
+            world=str(d.get("world") or ""),
+            domain=str(d.get("domain") or ""),
+            time_budget=d.get("time_budget"),
+            resource_budget=dict(d.get("resource_budget") or {}),
+            required_evidence=list(d.get("required_evidence") or []),
+            approval_gates=list(d.get("approval_gates") or []),
             extensions=dict(d.get("extensions") or {}),
         )
 
