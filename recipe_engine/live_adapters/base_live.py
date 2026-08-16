@@ -214,6 +214,7 @@ class LiveAdapterBase:
         duration_ms: int = 0,
         upstream_writes: list[Any] | None = None,
         write_class: Any | None = None,
+        mutation_attempted: bool = False,
     ) -> AdapterResult:
         observed = meta.observed_at or "1970-01-01T00:00:00.000Z"
         return make_result(
@@ -235,7 +236,7 @@ class LiveAdapterBase:
             mission_id=meta.mission_id,
             plan_id=meta.plan_id,
             step_id=meta.step_id,
-            mutation_attempted=False,
+            mutation_attempted=mutation_attempted,
             evidence_refs=evidence_refs or [],
             error_code=error_code,
             retryable=retryable,

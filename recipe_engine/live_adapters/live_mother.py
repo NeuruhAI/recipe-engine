@@ -47,7 +47,7 @@ class LiveMotherAdapter(LiveAdapterBase):
         return resp.json()
 
     def health_snapshot(self, *, observed_at: str, meta: AdapterRequestMeta | None = None) -> HealthSnapshot:
-        timeout = (meta.timeout_ms if meta and meta.timeout_ms else 5_000)
+        timeout = self.op_timeout(_OP_HEALTH, meta)
         body = self._get("/health", timeout)
         if not isinstance(body, Mapping):
             raise MalformedResponse("mother health is not an object", {})
@@ -111,7 +111,7 @@ class LiveMotherAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(receipt_ref if isinstance(receipt_ref, Mapping) else None, context="mother.equivalence")
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 5_000)
+            timeout = self.op_timeout(_OP_RECEIPT, meta)
             if isinstance(receipt_ref, Mapping):
                 body = dict(receipt_ref)  # caller supplied a pre-observed receipt
             else:

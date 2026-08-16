@@ -54,7 +54,7 @@ class LiveGovernanceAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(None, context="governance.health")
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 4_000)
+            timeout = self.op_timeout(_OP_HEALTH, meta)
             body = self._get("/health", timeout)
             validated = validate_governance_health(dict(body) if isinstance(body, Mapping) else {})
         except Exception as exc:  # noqa: BLE001
@@ -88,7 +88,7 @@ class LiveGovernanceAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(None, context="governance.default_policy")
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 4_000)
+            timeout = self.op_timeout(_OP_POLICY, meta)
             body = self._get("/v1/policy", timeout)
             if not isinstance(body, Mapping) or "policy_version" not in body:
                 raise TransportMalformed("governance policy lacks policy_version")
@@ -135,7 +135,7 @@ class LiveGovernanceAdapter(LiveAdapterBase):
             if "policy" in action_dict:
                 raise UnsafeCapability("caller policy override is forbidden", {})
             request_hash = hash_payload(action_dict)
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 4_000)
+            timeout = self.op_timeout(_OP_DECIDE, meta)
             resp = self._http.request(
                 _SERVICE, "/v1/evaluate", timeout_ms=timeout, method="POST", json_body={"action": action_dict}
             )

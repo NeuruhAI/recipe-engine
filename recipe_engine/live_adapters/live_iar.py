@@ -56,7 +56,7 @@ class LiveIARAdapter(LiveAdapterBase):
         t0 = time.monotonic()
         try:
             reject_mutation_shaped(None, context="iar.health")
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 6_000)
+            timeout = self.op_timeout(_OP_HEALTH, meta)
             body = self._get("/health", timeout)
             if not isinstance(body, Mapping):
                 raise TransportMalformed("iar health is not an object")
@@ -114,7 +114,7 @@ class LiveIARAdapter(LiveAdapterBase):
             anchor_sha256 = self.settings.iar_ledger_baseline_sha256
             if not anchor_count or not anchor_sha256:
                 raise ProvenanceInvalid("IAR ledger baseline anchor is not configured", {})
-            timeout = (meta.timeout_ms if meta and meta.timeout_ms else 6_000)
+            timeout = self.op_timeout(_OP_PROV, meta)
             body = self._get("/provenance", timeout)
             if not isinstance(body, Mapping):
                 raise TransportMalformed("iar provenance is not an object")

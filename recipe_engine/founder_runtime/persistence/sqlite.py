@@ -18,13 +18,22 @@ from recipe_engine.founder_runtime.contracts.receipts import ExecutionReceipt
 from recipe_engine.founder_runtime.contracts.completion import CompletionReport
 from .schema import SCHEMA_SQL, SCHEMA_VERSION
 
+_SYNCHRONOUS_LEVELS = frozenset({"OFF", "NORMAL", "FULL", "EXTRA"})
+
 
 class SqliteStore:
     """Local transactional store. path must be temp or gitignored developer path."""
 
-    def __init__(self, path: str | Path, *, wal: bool = True):
+    def __init__(self, path: str | Path, *, wal: bool = True, synchronous: str = "FULL"):
         self.path = Path(path)
         self._wal = wal
+        # Durability level for the power-loss claim.  WAL defaults to NORMAL,
+        # under which a host power failure can discard the most recently
+        # committed transactions — the event append and its projection CAS are
+        # atomic with respect to each other but not durable with respect to the
+        # host.  FULL fsyncs the WAL on every commit, which is what "survives
+        # power loss" has to mean.  Tests may pass NORMAL for speed.
+        self._synchronous = synchronous
         self._conn: sqlite3.Connection | None = None
 
     def initialize(self) -> None:
@@ -37,6 +46,18 @@ class SqliteStore:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             except sqlite3.Error:
                 pass
+        if self._synchronous:
+            # Must follow journal_mode: setting WAL does not reset synchronous,
+            # but ordering keeps the intent obvious to the next reader.  PRAGMA
+            # takes no bound parameters, so the value is allowlisted rather than
+            # interpolated from whatever the caller passed.
+            level = str(self._synchronous).upper()
+            if level not in _SYNCHRONOUS_LEVELS:
+                raise PersistenceConflict(
+                    "unsupported synchronous level",
+                    {"requested": str(self._synchronous), "allowed": sorted(_SYNCHRONOUS_LEVELS)},
+                )
+            self._conn.execute(f"PRAGMA synchronous={level}")
         self._conn.executescript(SCHEMA_SQL)
         cur = self._conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'")
         row = cur.fetchone()
