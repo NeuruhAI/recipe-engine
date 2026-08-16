@@ -37,12 +37,19 @@ from recipe_engine.founder_runtime.runtime.approvals import (
 from recipe_engine.founder_runtime.observability.logging import RuntimeLog
 from recipe_engine.founder_runtime.observability.metrics import Metrics
 
+# The two worlds a runtime's organs may come from. "live_readonly" is a label
+# for evidence provenance, not a capability: it grants no execution, no
+# production writes, no Governance authority, no provider actions and no
+# outbound communication. Anything else fails closed.
+RUNTIME_ADAPTER_MODES: frozenset[str] = frozenset({"fixture", "live_readonly"})
+
 
 class MissionRuntime:
     """
     Persistent mission kernel.
 
-    Adapter mode must be explicit fixture. No live services.
+    Adapter mode is an explicit, truthful label: "fixture" or "live_readonly".
+    It widens self-description, never authority — see __init__.
     Model output cannot transition state — only MissionEvent via this runtime.
     Mission body mutations only via append-only events.
     """
@@ -55,9 +62,22 @@ class MissionRuntime:
         worker_id: str | None = None,
         adapter_mode: str = "fixture",
     ):
-        if adapter_mode != "fixture":
-            raise AdapterModeInvalid("MissionRuntime P1 requires adapter_mode='fixture'", {"mode": adapter_mode})
-        self.adapter_mode = "fixture"
+        # The runtime declares which world its organs came from. It was pinned
+        # to "fixture" and rejected anything else, which is now a false
+        # self-description: the long-horizon mission genuinely drives live
+        # read-only organs, and a runtime that reports "fixture" while doing so
+        # mislabels its own evidence.
+        #
+        # This widens a LABEL, not authority. "live_readonly" grants nothing —
+        # organs are injected by a composition root, the store is local either
+        # way, and the read-only envelope is unchanged. The system-status
+        # vertical slice still requires "fixture" and refuses anything else.
+        if adapter_mode not in RUNTIME_ADAPTER_MODES:
+            raise AdapterModeInvalid(
+                "MissionRuntime adapter mode must be fixture or live_readonly",
+                {"mode": adapter_mode, "allowed": sorted(RUNTIME_ADAPTER_MODES)},
+            )
+        self.adapter_mode = adapter_mode
         self.clock = clock or SystemClock()
         self.worker_id = worker_id if worker_id is not None else default_worker_id()
         self.store = SqliteStore(db_path)
@@ -603,9 +623,20 @@ class MissionRuntime:
             kind=kind,
             plan_id=plan_id,
         )
+        # The checkpoint key names a resume BOUNDARY, and a re-attempted stage
+        # revisits the same boundary with a legitimately different body (fresh
+        # checkpoint_id, timestamp, mission version). Same doctrine as
+        # mark_side_effect: a re-emission is a new attempt, scoped by count;
+        # the first emission keeps the legacy key.
+        base = f"checkpoint:{ck.idempotency_key or ck.checkpoint_id}"
+        prior = self.store._c().execute(
+            "SELECT COUNT(*) FROM mission_events WHERE mission_id=? AND (idempotency_key=? OR idempotency_key LIKE ?)",
+            (mission_id, base, f"{base}:attempt:%"),
+        ).fetchone()[0]
+        idem = base if prior == 0 else f"{base}:attempt:{prior + 1}"
         self._record_same_state_event(
             mission_id, EventType.CHECKPOINT_RECORDED, "checkpoint_recorded",
-            {"checkpoint": ck.to_dict()}, f"checkpoint:{ck.idempotency_key or ck.checkpoint_id}",
+            {"checkpoint": ck.to_dict()}, idem,
             evidence_refs=[ck.checkpoint_id],
         )
         return self.store.save_checkpoint(ck)
@@ -704,11 +735,24 @@ class MissionRuntime:
 
     def mark_side_effect(self, key: str, mission_id: str, step_id: str, status: str, marker: dict[str, Any], receipt_id: str | None = None):
         et = EventType.SIDE_EFFECT_RECONCILED if status == "reconciled" else EventType.SIDE_EFFECT_MARKED
+        # A re-emission of the same (key, status) is a new attempt, not a replay
+        # of the first: its body legitimately differs (fresh timestamp), and
+        # append_event rightly refuses a reused key over a different body. A
+        # stage interrupted between "proposed" and its receipt was therefore
+        # impossible to re-propose after reconciliation — resume died on
+        # PersistenceConflict. Scope re-attempts by count; the first emission
+        # keeps the legacy key, so no existing event chain changes shape.
+        base = f"side_effect:{key}:{status}"
+        prior = self.store._c().execute(
+            "SELECT COUNT(*) FROM mission_events WHERE mission_id=? AND (idempotency_key=? OR idempotency_key LIKE ?)",
+            (mission_id, base, f"{base}:attempt:%"),
+        ).fetchone()[0]
+        idem = base if prior == 0 else f"{base}:attempt:{prior + 1}"
         self._record_same_state_event(
             mission_id, et, "side_effect_state_recorded",
             {"side_effect_key": key, "step_id": step_id, "status": status,
              "marker": dict(marker), "receipt_id": receipt_id},
-            f"side_effect:{key}:{status}", evidence_refs=[] if not receipt_id else [receipt_id],
+            idem, evidence_refs=[] if not receipt_id else [receipt_id],
         )
         return self.store.mark_side_effect(key, mission_id, step_id, status, marker, self.clock.now_iso(), receipt_id)
 

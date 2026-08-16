@@ -16,7 +16,6 @@ organ is disclosed as an evidence gap and never substituted with a fixture.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -29,39 +28,15 @@ from recipe_engine.founder_runtime.missions import run_long_horizon_mission
 from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
 
 
-def _newest_audit(root: str) -> str | None:
-    if not os.path.isdir(root):
-        return None
-    for name in sorted((d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))), reverse=True):
-        audit = os.path.join(root, name)
-        if os.path.isfile(os.path.join(audit, "FINAL_VERDICT.md")):
-            return audit
-    return None
-
-
 def build_live_settings():
-    from recipe_engine.live_adapters.canonical_topology import (
-        build_canonical_topology,
-        read_endpoint_port_from_audit,
-    )
-    from recipe_engine.live_adapters.settings import RepoRoot
+    # Canonical topology construction moved beside the organ builders it feeds;
+    # this name stays for callers that already know it.
+    from recipe_engine.live_adapters.composition import build_default_live_settings
 
-    home = os.path.expanduser("~")
-    base = f"{home}/neuruh-workspace/audit-output"
-    mother_audit = _newest_audit(f"{base}/mother-p2b-readonly-http")
-    aegis_audit = _newest_audit(f"{base}/aegis-p2b-readonly-opinion-http")
-    if not mother_audit or not aegis_audit:
-        raise SystemExit("Mother/AEGIS GREEN audits not present — canonical topology cannot be built")
-    return build_canonical_topology(
-        repo_roots=(
-            RepoRoot("NeuruhAI/recipe-engine", f"{home}/neuruh-repos/NeuruhAI/recipe-engine"),
-            RepoRoot("NeuruhAI/neuruh-vault", f"{home}/neuruh-repos/NeuruhAI/neuruh-vault", role="vault_source"),
-            RepoRoot("neuruh-vault-runtime", f"{home}/neuruh-vault", role="vault_runtime"),
-        ),
-        mother_port=read_endpoint_port_from_audit(mother_audit, "mother"),
-        aegis_port=read_endpoint_port_from_audit(aegis_audit, "aegis"),
-        host_recovery_audit_base=base,
-    )
+    try:
+        return build_default_live_settings()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def main() -> int:
@@ -81,7 +56,12 @@ def main() -> int:
         organs = build_live_organs(settings)
         executor = build_live_executor(settings)
 
-    runtime = MissionRuntime(db, clock=SteppingClock(), adapter_mode="fixture")
+    # The runtime's adapter mode is a truthful label of where its organs came
+    # from — a live run must not self-describe as fixture.
+    runtime = MissionRuntime(
+        db, clock=SteppingClock(),
+        adapter_mode="live_readonly" if mode == "live" else "fixture",
+    )
     try:
         result = run_long_horizon_mission(
             runtime,
