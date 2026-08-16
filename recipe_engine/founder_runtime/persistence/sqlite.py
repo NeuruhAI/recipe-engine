@@ -16,6 +16,7 @@ from recipe_engine.founder_runtime.contracts.checkpoint import Checkpoint
 from recipe_engine.founder_runtime.contracts.approval import Approval
 from recipe_engine.founder_runtime.contracts.receipts import ExecutionReceipt
 from recipe_engine.founder_runtime.contracts.completion import CompletionReport
+from .migrations import apply_migration, plan_migration
 from .schema import SCHEMA_SQL, SCHEMA_VERSION
 
 _SYNCHRONOUS_LEVELS = frozenset({"OFF", "NORMAL", "FULL", "EXTRA"})
@@ -58,19 +59,48 @@ class SqliteStore:
                     {"requested": str(self._synchronous), "allowed": sorted(_SYNCHRONOUS_LEVELS)},
                 )
             self._conn.execute(f"PRAGMA synchronous={level}")
-        self._conn.executescript(SCHEMA_SQL)
-        cur = self._conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'")
-        row = cur.fetchone()
-        if row is None:
+        # Read the recorded version BEFORE touching the database.  Previously
+        # the schema script ran first, so a database at an unknown version had
+        # tables created in it and was only then refused — it failed closed, but
+        # not before writing.  Nothing is written now until the version is known
+        # to be one this build can serve.
+        stored = self._read_schema_version()
+        self.migrations_applied: list[str] = []
+
+        if stored is None:
+            # Fresh database.
+            self._conn.executescript(SCHEMA_SQL)
             self._conn.execute(
                 "INSERT INTO schema_meta(key, value) VALUES ('schema_version', ?)",
                 (SCHEMA_VERSION,),
             )
-        elif row["value"] != SCHEMA_VERSION:
+            return
+
+        steps = plan_migration(stored, SCHEMA_VERSION)
+        if steps is None:
             raise PersistenceConflict(
                 "schema version mismatch",
-                {"found": row["value"], "expected": SCHEMA_VERSION},
+                {"found": stored, "expected": SCHEMA_VERSION, "forward_path": False},
             )
+        if steps:
+            self.migrations_applied = apply_migration(self._conn, steps)
+        # Idempotent: every statement is IF NOT EXISTS, so this adds nothing to
+        # an already-current database and completes a partially-created one.
+        self._conn.executescript(SCHEMA_SQL)
+
+    def _read_schema_version(self) -> str | None:
+        """The recorded version, or None if this database has no schema yet."""
+        conn = self._conn
+        assert conn is not None
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_meta'"
+        ).fetchone()
+        if exists is None:
+            return None
+        row = conn.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+        return None if row is None else str(row["value"])
 
     def close(self) -> None:
         if self._conn is not None:
