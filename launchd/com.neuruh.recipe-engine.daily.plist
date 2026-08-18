@@ -12,7 +12,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/jeramiehicks/repos/recipe-engine/scripts/daily_run.sh</string>
+        <string>/Users/jeramiehicks/neuruh-repos/NeuruhAI/recipe-engine/scripts/daily_run.sh</string>
     </array>
 
     <key>StartCalendarInterval</key>
@@ -24,12 +24,12 @@
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>/Users/jeramiehicks/repos/recipe-engine</string>
+    <string>/Users/jeramiehicks/neuruh-repos/NeuruhAI/recipe-engine</string>
 
     <key>StandardOutPath</key>
-    <string>/Users/jeramiehicks/repos/recipe-engine/data/daily_run.out.log</string>
+    <string>/Users/jeramiehicks/neuruh-repos/NeuruhAI/recipe-engine/data/daily_run.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/jeramiehicks/repos/recipe-engine/data/daily_run.err.log</string>
+    <string>/Users/jeramiehicks/neuruh-repos/NeuruhAI/recipe-engine/data/daily_run.err.log</string>
 
     <!-- if the Mac is asleep at 06:00, launchd fires the job on wake -->
 </dict>
