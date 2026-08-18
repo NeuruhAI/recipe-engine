@@ -29,9 +29,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO))
 
-from recipe_engine.cities import ANCHOR_CITIES, attribute_county, centroid_for
-from recipe_engine.fetch import fetch_anchor
-from recipe_engine.parse import parse_sale_events, canon_keys
+from recipe_engine.cities import (ANCHOR_CITIES, ANCHOR_QUERIES, attribute_county,
+                                  centroid_for)
+from recipe_engine.source_api import fetch_anchor_events
+from recipe_engine.parse import canon_keys
 from recipe_engine.engine import LandosEngine, EngineError
 from recipe_engine import persist
 from recipe_engine.persist import NodeForkError
@@ -98,24 +99,36 @@ def main():
     conn = persist.connect(database_url)
     try:
         cur = conn.cursor()
-        for slug, city_path in ANCHOR_CITIES.items():
+        for slug in ANCHOR_CITIES:
             counts["anchors"] += 1
-            html, from_cache, final_url = fetch_anchor(slug, city_path, cache_dir, today)
+            events, from_cache, final_url = fetch_anchor_events(
+                slug, ANCHOR_QUERIES[slug], cache_dir, today)
             counts["cache_hits" if from_cache else "pages_fetched"] += 1
 
             anchor_events = 0
-            for ev in parse_sale_events(html):
+            anchor_in_terr = 0
+            anchor_dupes = 0
+            for ev in events:
                 anchor_events += 1
                 if ev["listing_id"] in seen_listing_ids:
-                    continue  # same sale appears on multiple market pages
+                    anchor_dupes += 1
+                    continue  # anchor radii overlap; the same sale is not two sales
                 seen_listing_ids.add(ev["listing_id"])
                 counts["events_seen"] += 1
 
                 county_slug, in_terr = attribute_county(
                     ev["state"], ev["postal_code"], ev["city"])
-                cen = centroid_for(ev["state"], ev["city"]) if in_terr else None
-                lat, lng = (cen if cen else (None, None))
-                geo = "centroid" if cen else "none"
+                if in_terr:
+                    anchor_in_terr += 1
+                # The source carries each sale's OWN coordinates. Use them; fall
+                # back to the city centroid only when the source withholds them,
+                # and never call a centroid 'exact'.
+                if ev.get("latitude") is not None and ev.get("longitude") is not None:
+                    lat, lng, geo = ev["latitude"], ev["longitude"], "exact"
+                else:
+                    cen = centroid_for(ev["state"], ev["city"]) if in_terr else None
+                    lat, lng = (cen if cen else (None, None))
+                    geo = "centroid" if cen else "none"
 
                 provenance = f"estatesales.net:{slug}:{run_id}"
                 if persist.upsert_event(cur, ev, county_slug, in_terr,
@@ -140,21 +153,24 @@ def main():
                         engine_failures.append(str(e))
 
             per_anchor[slug] = {"events_on_page": anchor_events,
+                                "in_territory": anchor_in_terr,
+                                "duplicates_removed": anchor_dupes,
                                 "from_cache": from_cache,
                                 "final_url": final_url}
             print(f"{slug}: {anchor_events} events "
+                  f"({anchor_in_terr} in territory, {anchor_dupes} dupes) "
                   f"({'cache' if from_cache else 'fetched'})")
 
         if counts["events_seen"] == 0:
             conn.rollback()
-            print("FATAL: zero events across ALL anchors = parse failure. "
-                  "Inspect data/cache/*.html ld+json by hand.", file=sys.stderr)
+            print("FATAL: zero events across ALL anchors = source failure. "
+                  "Inspect data/cache/*.api.json by hand.", file=sys.stderr)
             return 2
 
         manifest = {
             "run_id": run_id,
             "started_at": now.isoformat(),
-            "source": "estatesales.net",
+            "source": "estatesales.net:/api/sale-details",
             "counts": counts,
             "per_anchor": per_anchor,
             "node_records": [

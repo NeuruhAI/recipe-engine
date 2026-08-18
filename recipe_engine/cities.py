@@ -122,3 +122,25 @@ def centroid_for(state: str, locality: str):
     """(lat, lng) city centroid or None. Callers must flag geo_precision."""
     loc = (locality or "").strip().upper().replace(".", "")
     return CITY_CENTROIDS.get(((state or "").strip().upper(), loc))
+
+# Anchor query geometry for the JSON source (source_api.py): the anchor's own
+# centroid plus a radius in MILES. The radius is deliberately local — 25 miles
+# keeps each anchor on its own market. Anchors overlap and that is fine: run.py
+# dedupes by listing_id, so an overlap costs one comparison, never a double count.
+ANCHOR_RADIUS_MILES = 25
+
+ANCHOR_QUERIES = {
+    "benton-harbor":   (42.1167, -86.4542, ANCHOR_RADIUS_MILES),
+    "saint-joseph-mi": (42.1098, -86.4801, ANCHOR_RADIUS_MILES),
+    "niles":           (41.8298, -86.2542, ANCHOR_RADIUS_MILES),
+    "buchanan":        (41.8273, -86.3611, ANCHOR_RADIUS_MILES),
+    "berrien-springs": (41.9464, -86.3389, ANCHOR_RADIUS_MILES),
+    "coloma":          (42.1861, -86.3083, ANCHOR_RADIUS_MILES),
+    "new-buffalo":     (41.7937, -86.7439, ANCHOR_RADIUS_MILES),
+    "south-bend":      (41.6764, -86.2520, ANCHOR_RADIUS_MILES),
+    "mishawaka":       (41.6620, -86.1586, ANCHOR_RADIUS_MILES),
+    "granger":         (41.7536, -86.1108, ANCHOR_RADIUS_MILES),
+    "dowagiac":        (41.9842, -86.1086, ANCHOR_RADIUS_MILES),
+    "edwardsburg":     (41.7948, -86.0803, ANCHOR_RADIUS_MILES),
+    "elkhart":         (41.6820, -85.9767, ANCHOR_RADIUS_MILES),
+}

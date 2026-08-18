@@ -22,9 +22,14 @@ PROTECTED = [
     "recipe_engine/adapters/base.py",
 ]
 
-# Expected hashes at P0 base 4756e3d
+# Expected hashes at P0 base 4756e3d.
+# RE-PINNED 2026-08-18 (E3 lane A): run.py and cities.py moved deliberately when
+# the anchor source switched from the SSR paid-carousel scrape to the site's own
+# /api/sale-details endpoint. The tripwire did its job — it caught the change.
+# Everything it guards downstream (canon keys, persist contract, engine call) is
+# unchanged; see recipe_engine/source_api.py and tests/test_source_api.py.
 EXPECTED = {
-    "run.py": "5e780f9fe4e76e5d47ec3d1df923a8a0fafe5c2c54aaf699a06fb0c4aa01cb52",
+    "run.py": "fb5c22096e4c02820d00f941d9541fb0bc6709445a52982a250f33245ed4aedf",
     "recipe_engine/parse.py": "07e57993d1695f6c91df1225dbd15c372625f0fe951761bcea02ce32c95e1f00",
     "recipe_engine/fetch.py": "8d248a3726fb9906f7228b61f452b938ea34247ee5c613697c7b44f3fb81042d",
     "recipe_engine/persist.py": "3af9deb40a6326185f6ffc8e0fc16ec2464c2ceb83bec5b39fa7ab75962154dc",

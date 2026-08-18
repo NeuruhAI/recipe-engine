@@ -44,16 +44,17 @@ FORBIDDEN_IMPORTS = {
 
 class PipelineRegressionTests(unittest.TestCase):
     def test_protected_files_unchanged(self):
-        # expected hashes from pre-implementation baseline (computed at worktree create)
+        # expected hashes from pre-implementation baseline (computed at worktree create).
+        # run.py + cities.py re-pinned 2026-08-18 (E3 lane A: SSR carousel -> /api/sale-details).
         expected = {
-            "run.py": "5e780f9fe4e76e5d47ec3d1df923a8a0fafe5c2c54aaf699a06fb0c4aa01cb52",
+            "run.py": "fb5c22096e4c02820d00f941d9541fb0bc6709445a52982a250f33245ed4aedf",
             "scripts/daily_run.sh": "d55e18e2144251e4ba9d14d460ca6ad5d6a4a812d34bb9ba2590cc4794b14357",
             "db/010_recipe_schema.sql": "92fe05549eceb58b2f6514653e5b700b318c45446ea3dcb64eff95409df4cfd3",
             "recipe_engine/engine.py": "e0e7f29ee2f6946044e5f4a0e962114cdab12a27942022ffaeb94b77dd2c15cd",
             "recipe_engine/parse.py": "07e57993d1695f6c91df1225dbd15c372625f0fe951761bcea02ce32c95e1f00",
             "recipe_engine/persist.py": "3af9deb40a6326185f6ffc8e0fc16ec2464c2ceb83bec5b39fa7ab75962154dc",
             "recipe_engine/fetch.py": "8d248a3726fb9906f7228b61f452b938ea34247ee5c613697c7b44f3fb81042d",
-            "recipe_engine/cities.py": "4a803fa3e44328bb136c58345f625a701553571e63af33103617c7665818fbad",
+            "recipe_engine/cities.py": "28f4fa5c7656ea5a9328fceafd0678341796816491dd5e9741d275efd4a5ee8a",
         }
         for rel, exp in expected.items():
             data = (ROOT / rel).read_bytes()
