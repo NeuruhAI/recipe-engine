@@ -2,3 +2,5 @@
 2026-06-15T10:00:50Z run_id=daily-20260615T100000Z mode=no-engine exit=0 events=26 upserted=24 in_territory=2 report_only=24 engine_ok=0/0 sha256=524bc6871d8106ed20a94c3d527a24bafa437d1a62b1bb37d3dd717d0ace5551
 2026-06-16T10:00:50Z run_id=daily-20260616T100000Z mode=no-engine exit=0 events=24 upserted=6 in_territory=2 report_only=22 engine_ok=0/0 sha256=2827fd91617afe6545a54380447ea469f2dae45d0b158bd8895a9a49971b34db
 2026-06-17T10:00:54Z run_id=daily-20260617T100000Z mode=no-engine exit=0 events=25 upserted=6 in_territory=2 report_only=23 engine_ok=0/0 sha256=2ab2cea0b5eeaae711cd897254297db965a9cd8422e4088c9dda302eea433de3
+2026-08-18T01:52:53Z run_id=daily-20260818T015154Z mode=engine exit=0 events=27 upserted=27 in_territory=0 report_only=27 engine_ok=0/0 sha256=9419b7593d03a584a52037020a2703fec64555a5e6980fe5a695b9bd417aa8f7
+2026-08-18T10:00:08Z run_id=daily-20260818T100004Z mode=engine exit=0 events=27 upserted=0 in_territory=0 report_only=27 engine_ok=0/0 sha256=3f9f6fdf83035ccafafcea2fd14c49548ed1b70e77a743d20c2255856b2aab00

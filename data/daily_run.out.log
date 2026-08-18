@@ -79,3 +79,31 @@ manifest sha256: 2ab2cea0b5eeaae711cd897254297db965a9cd8422e4088c9dda302eea433de
   "engine_called": 0,
   "engine_ok": 0
 }
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 20 events (cache)
+saint-joseph-mi: 20 events (cache)
+niles: 20 events (cache)
+buchanan: 20 events (cache)
+berrien-springs: 20 events (cache)
+coloma: 20 events (cache)
+new-buffalo: 20 events (cache)
+south-bend: 20 events (cache)
+mishawaka: 20 events (cache)
+granger: 20 events (cache)
+dowagiac: 20 events (cache)
+edwardsburg: 20 events (cache)
+elkhart: 20 events (cache)
+
+manifest: /Users/jeramiehicks/neuruh-repos/NeuruhAI/recipe-engine/data/manifests/run_daily-20260818T100004Z.manifest.json
+manifest sha256: 3f9f6fdf83035ccafafcea2fd14c49548ed1b70e77a743d20c2255856b2aab00
+{
+  "anchors": 13,
+  "pages_fetched": 0,
+  "cache_hits": 13,
+  "events_seen": 27,
+  "events_upserted": 0,
+  "in_territory": 0,
+  "report_only": 27,
+  "engine_called": 0,
+  "engine_ok": 0
+}
