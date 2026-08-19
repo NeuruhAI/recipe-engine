@@ -1,0 +1,127 @@
+{
+  "run_id": "graduation-court-20260819T100012Z",
+  "generated_at": "2026-08-19T10:00:12.436764Z",
+  "policy": {
+    "min_corroborating_sources": 2,
+    "require_real_parcel_identity": true,
+    "require_distress_for_candidate": true,
+    "min_opportunity_score": 40,
+    "max_evidence_age_days": 365,
+    "conflict_blocks_promotion": true,
+    "missing_data_is_never_a_pass": true
+  },
+  "promoted": false,
+  "signals_evaluated": 9,
+  "research_eligible": 0,
+  "candidate_eligible": 0,
+  "results": [
+    {
+      "SIGNAL_ID": "4958115",
+      "PROPERTY_IDENTITY": "estate-4958115 (Stevensville, MI 49127) county=berrien-mi",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "4993218",
+      "PROPERTY_IDENTITY": "estate-4993218 (Bridgman, MI 49106) county=berrien-mi",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "4995987",
+      "PROPERTY_IDENTITY": "estate-4995987 (Saint Joseph, MI 49085) county=berrien-mi",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "5003424",
+      "PROPERTY_IDENTITY": "estate-5003424 (South Bend, IN 46601) county=st-joseph-in",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "5021610",
+      "PROPERTY_IDENTITY": "estate-5021610 (South Bend, IN 46601) county=st-joseph-in",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "5029542",
+      "PROPERTY_IDENTITY": "estate-5029542 (South Bend, IN 46614) county=st-joseph-in",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "5030895",
+      "PROPERTY_IDENTITY": "estate-5030895 (Coloma, MI 49038) county=berrien-mi",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "5038419",
+      "PROPERTY_IDENTITY": "estate-5038419 (Baroda, MI 49101) county=berrien-mi",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    },
+    {
+      "SIGNAL_ID": "5038740",
+      "PROPERTY_IDENTITY": "estate-5038740 (South Bend, IN 46635) county=st-joseph-in",
+      "CORROBORATING_SIGNALS": 1,
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING_REQUIREMENTS": [
+        "real_parcel_apn"
+      ],
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "WOULD_PROMOTE_TO_CANDIDATE": false
+    }
+  ]
+}

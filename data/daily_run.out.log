@@ -107,3 +107,31 @@ manifest sha256: 3f9f6fdf83035ccafafcea2fd14c49548ed1b70e77a743d20c2255856b2aab0
   "engine_called": 0,
   "engine_ok": 0
 }
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 9 events (5 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 8 events (0 in territory, 8 dupes) (fetched)
+niles: 12 events (4 in territory, 6 dupes) (fetched)
+buchanan: 13 events (0 in territory, 12 dupes) (fetched)
+berrien-springs: 11 events (0 in territory, 11 dupes) (fetched)
+coloma: 11 events (0 in territory, 9 dupes) (fetched)
+new-buffalo: 13 events (0 in territory, 5 dupes) (fetched)
+south-bend: 11 events (0 in territory, 11 dupes) (fetched)
+mishawaka: 9 events (0 in territory, 8 dupes) (fetched)
+granger: 9 events (0 in territory, 9 dupes) (fetched)
+dowagiac: 15 events (0 in territory, 13 dupes) (fetched)
+edwardsburg: 10 events (0 in territory, 10 dupes) (fetched)
+elkhart: 10 events (0 in territory, 10 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/neuruh-repos/NeuruhAI/recipe-engine/data/manifests/run_daily-20260819T100003Z.manifest.json
+manifest sha256: d8cd10b07421a4feb3343c987fdecc1a605f406137ab1504639cf5770de990cd
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 29,
+  "events_upserted": 0,
+  "in_territory": 9,
+  "report_only": 20,
+  "engine_called": 9,
+  "engine_ok": 9
+}
