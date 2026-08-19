@@ -44,10 +44,13 @@ from recipe_engine.graduation import (
     POLICY_VERSION, GraduationPolicy, GraduationState, PropertyIdentity,
     SignalEvidence, classify,
 )
+from recipe_engine.graduation_ledger import append_decisions, verify_chain
 
 IDENTITY_GLOB = str(Path.home() / "neuruh-repos/NeuruhAI/landos-engine"
                     / "data/signal_identity_runs/*.json")
 OUT_DIR = REPO / "data" / "graduation_runs"
+#: Durable, hash-chained record of every decision — the 017 binding surface.
+LEDGER = REPO / "data" / "graduation_decisions.jsonl"
 
 #: The one source these signals actually have. estatesales.net is a real public
 #: listing service, not a county of record — OBSERVED, not DOMAIN_AUTHORITY.
@@ -163,6 +166,8 @@ def main() -> int:
             "POLICY_VERSION": verdict.policy_version,
             "EVIDENCE_HASH": verdict.evidence_hash,
             "REAL_PARCEL_APN": ident.get("REAL_PARCEL_APN"),
+            "PROPERTY_KEY": (f'{ident.get("STATE")}:{ident.get("COUNTY_FIPS")}:{ident.get("REAL_PARCEL_APN")}'
+                             if ident.get("REAL_PARCEL_APN") else None),
             "IDENTITY_VERDICT": ident.get("IDENTITY_VERDICT"),
             "WOULD_PROMOTE_TO_RESEARCH": verdict.would_promote_to_research,
             "SHADOW_CANDIDATE_ELIGIBLE": verdict.would_promote_to_candidate,
@@ -196,6 +201,23 @@ def main() -> int:
         outcome["batch_id"] = str(outcome["batch_id"])
         receipt["revise_result"] = outcome
 
+    # E5-C: every decision lands in the durable ledger, outcome-ready. A replay
+    # appends nothing, so this cannot grow on re-runs.
+    ledger_result = append_decisions(LEDGER, [{
+        "signal_id": r["SIGNAL_ID"],
+        "classification": r["STATE"],
+        "policy_version": r["POLICY_VERSION"],
+        "evidence_hash": r["EVIDENCE_HASH"],
+        "decided_at": receipt["generated_at"],
+        "property_key": r.get("PROPERTY_KEY"),
+        "identity_verdict": r["IDENTITY_VERDICT"],
+        "missing": r["MISSING"],
+        "run_id": run_id,
+    } for r in results])
+    receipt["calibration_ledger"] = {
+        "path": str(LEDGER), **ledger_result, "chain": verify_chain(LEDGER),
+    }
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{run_id}.json"
     path.write_text(json.dumps(receipt, indent=2, default=str), encoding="utf-8")
@@ -212,6 +234,7 @@ def main() -> int:
                        "production_candidate_promoted")}, indent=2))
     if "revise_result" in receipt:
         print("  revise_result:", receipt["revise_result"])
+    print("  calibration_ledger:", json.dumps(receipt["calibration_ledger"]))
     print("  receipt:", path)
     return 0
 

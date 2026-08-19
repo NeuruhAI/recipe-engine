@@ -1,0 +1,253 @@
+{
+  "run_id": "graduation-v1-20260819T104206Z",
+  "generated_at": "2026-08-19T10:42:06.836386Z",
+  "policy_version": "graduation.v1",
+  "policy": {
+    "conflict_blocks_promotion": true,
+    "max_evidence_age_days": 365,
+    "min_corroborating_sources": 2,
+    "min_opportunity_score": 55,
+    "missing_data_is_never_a_pass": true,
+    "require_complete_provenance": true,
+    "require_distress_for_candidate": true,
+    "require_real_parcel_identity": true
+  },
+  "identity_receipt": "/Users/jeramiehicks/neuruh-repos/NeuruhAI/landos-engine/data/signal_identity_runs/signal-identity-20260819T103419Z.json",
+  "signals_total": 9,
+  "states": {
+    "research_property": 4,
+    "observed_signal": 5
+  },
+  "research_eligible": 4,
+  "shadow_candidate_eligible": 0,
+  "research_promoted": false,
+  "production_candidate_promoted": false,
+  "results": [
+    {
+      "SIGNAL_ID": "4958115",
+      "STATE": "research_property",
+      "WHY": "real property with one current non-authoritative source \u2014 research, not corroborated",
+      "MISSING": [
+        "second_distinct_source"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "a1447dc7730e92cb90a3b493098c4ca33f0fe8970bc29c388f7634340e8f3285",
+      "REAL_PARCEL_APN": "11-12-5220-0128-00-0",
+      "PROPERTY_KEY": "MI:26021:11-12-5220-0128-00-0",
+      "IDENTITY_VERDICT": "RESOLVED",
+      "WOULD_PROMOTE_TO_RESEARCH": true,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "4993218",
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING": [
+        "real_parcel_apn"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "5d157f43942244d1818888e85b8814d0d38315893f0f70deae6ab9ef5592c092",
+      "REAL_PARCEL_APN": null,
+      "PROPERTY_KEY": null,
+      "IDENTITY_VERDICT": "SENTINEL_PARCEL_REJECTED",
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "4995987",
+      "STATE": "research_property",
+      "WHY": "real property with one current non-authoritative source \u2014 research, not corroborated",
+      "MISSING": [
+        "second_distinct_source"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "b671a4d89fff619d78590c89ec8c8c132d6cbc2ee6de543a99f02dd4e4c583e2",
+      "REAL_PARCEL_APN": "11-17-0006-0001-04-0",
+      "PROPERTY_KEY": "MI:26021:11-17-0006-0001-04-0",
+      "IDENTITY_VERDICT": "RESOLVED",
+      "WOULD_PROMOTE_TO_RESEARCH": true,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "5003424",
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING": [
+        "real_parcel_apn"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "29132d58ab377b345f0fa9ece31eebccd5966096e7926be37f26086c123fb75a",
+      "REAL_PARCEL_APN": null,
+      "PROPERTY_KEY": null,
+      "IDENTITY_VERDICT": "NO_RESOLVER_FOR_COUNTY",
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "5021610",
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING": [
+        "real_parcel_apn"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "f5af6a20cd17ec54c2c605a95266651e5ca88fb4126356042acc4350f88a017b",
+      "REAL_PARCEL_APN": null,
+      "PROPERTY_KEY": null,
+      "IDENTITY_VERDICT": "NO_RESOLVER_FOR_COUNTY",
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "5029542",
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING": [
+        "real_parcel_apn"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "4f94126a64a2998d1203234b2f453bb0d31acb79ab5fce09574e6fd07ae48e96",
+      "REAL_PARCEL_APN": null,
+      "PROPERTY_KEY": null,
+      "IDENTITY_VERDICT": "NO_RESOLVER_FOR_COUNTY",
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "5030895",
+      "STATE": "research_property",
+      "WHY": "real property with one current non-authoritative source \u2014 research, not corroborated",
+      "MISSING": [
+        "second_distinct_source"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "373ec3ba5d1baef6d7ac739f8784e7e88e7614d9f5f70a29827e4ed0eaa01e11",
+      "REAL_PARCEL_APN": "11-08-0018-0004-02-7",
+      "PROPERTY_KEY": "MI:26021:11-08-0018-0004-02-7",
+      "IDENTITY_VERDICT": "RESOLVED",
+      "WOULD_PROMOTE_TO_RESEARCH": true,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "5038419",
+      "STATE": "research_property",
+      "WHY": "real property with one current non-authoritative source \u2014 research, not corroborated",
+      "MISSING": [
+        "second_distinct_source"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "9d569a9cb23de2ce159043607cb8aa5477efc57d3337015e690c6d5837afa79b",
+      "REAL_PARCEL_APN": "11-02-0014-0015-03-0",
+      "PROPERTY_KEY": "MI:26021:11-02-0014-0015-03-0",
+      "IDENTITY_VERDICT": "RESOLVED",
+      "WOULD_PROMOTE_TO_RESEARCH": true,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    },
+    {
+      "SIGNAL_ID": "5038740",
+      "STATE": "observed_signal",
+      "WHY": "signal is real but is not yet tied to a real parcel identity",
+      "MISSING": [
+        "real_parcel_apn"
+      ],
+      "SOURCES": 1,
+      "FAMILIES": [
+        "estate_sale"
+      ],
+      "SCORE": null,
+      "EVIDENCE_AGE_DAYS": [
+        0
+      ],
+      "PROVENANCE_COMPLETE": true,
+      "POLICY_VERSION": "graduation.v1",
+      "EVIDENCE_HASH": "0bbbd7c6e9f434a7bdbf6316feaf034deaf11f8652d15926621d7a08698e77c5",
+      "REAL_PARCEL_APN": null,
+      "PROPERTY_KEY": null,
+      "IDENTITY_VERDICT": "NO_RESOLVER_FOR_COUNTY",
+      "WOULD_PROMOTE_TO_RESEARCH": false,
+      "SHADOW_CANDIDATE_ELIGIBLE": false
+    }
+  ],
+  "calibration_ledger": {
+    "path": "/Users/jeramiehicks/neuruh-repos/NeuruhAI/recipe-engine/data/graduation_decisions.jsonl",
+    "appended": 0,
+    "retained": 9,
+    "chain": {
+      "ok": true,
+      "entries": 9,
+      "tip": "6abaf12d7398021d2de943ea917078018e629c445c85b3a9a510dfa1aedef57a"
+    }
+  }
+}
