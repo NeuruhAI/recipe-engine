@@ -18,6 +18,7 @@ from typing import Any
 
 from recipe_engine.live_adapters.live_axon import LiveAxonReadonlyAdapter
 from recipe_engine.live_adapters.live_github import LiveGitHubAdapter
+from recipe_engine.live_adapters.live_governance import LiveGovernanceAdapter
 from recipe_engine.live_adapters.live_mother import LiveMotherAdapter
 from recipe_engine.live_adapters.live_qdrant import LiveQdrantAdapter
 from recipe_engine.live_adapters.live_vault import LiveVaultAdapter
@@ -67,18 +68,27 @@ def build_default_live_settings() -> LiveAdapterSettings:
 
 
 def build_live_organs(settings: LiveAdapterSettings) -> dict[str, Any]:
-    """The four read-only organs a long-horizon mission observes.
+    """The read-only organs a long-horizon mission observes.
 
     Every one is read-only by construction: Mother and GitHub expose inspection
     only, Vault serves provenance metadata but never document content, and
     Qdrant offers bounded verification behind the host-recovery gate and refuses
     semantic search outright.
+
+    Governance is one of them.  It was built, tested and then left out of this
+    dict, which is precisely why the live mission had no way to reach real
+    authority and fell back to a self-issued one.  A mission cannot construct it
+    (``founder_runtime`` must not import ``live_adapters``), so if the
+    composition root omits it there is no authority in the live path at all.
+    It is read-only here too: the adapter observes a decision and stamps
+    NOT_CLAIMED_BY_GOVERNANCE; it never requests or consumes mutation authority.
     """
     return {
         "mother": LiveMotherAdapter(settings),
         "github": LiveGitHubAdapter(settings),
         "vault": LiveVaultAdapter(settings),
         "qdrant": LiveQdrantAdapter(settings),
+        "governance": LiveGovernanceAdapter(settings),
     }
 
 

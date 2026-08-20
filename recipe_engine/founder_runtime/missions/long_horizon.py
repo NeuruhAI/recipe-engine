@@ -53,7 +53,7 @@ from recipe_engine.autonomy.models import (
     SV_OPPORTUNITY,
 )
 from recipe_engine.founder_runtime.adapters.fixture_governance import FixtureGovernance
-from recipe_engine.founder_runtime.adapters.protocols import AdapterRequestMeta
+from recipe_engine.founder_runtime.adapters.protocols import AdapterRequestMeta, GovernanceAction
 from recipe_engine.founder_runtime.contracts.authority import AuthorityClass
 from recipe_engine.founder_runtime.contracts.approval import (
     Approval,
@@ -64,7 +64,7 @@ from recipe_engine.founder_runtime.contracts.completion import AcceptanceResult
 from recipe_engine.founder_runtime.contracts.events import EventType
 from recipe_engine.founder_runtime.contracts.mission import DeliverableStatus
 from recipe_engine.founder_runtime.context.selector import select_packs
-from recipe_engine.founder_runtime.errors import FounderRuntimeError
+from recipe_engine.founder_runtime.errors import AuthorityDenied, FounderRuntimeError
 from recipe_engine.founder_runtime.evidence.receipts import expected_step_input_hash
 from recipe_engine.founder_runtime.evidence.validation import (
     assert_valid_live_receipt,
@@ -73,7 +73,10 @@ from recipe_engine.founder_runtime.evidence.validation import (
 from recipe_engine.founder_runtime.events.replay import replay_mission
 from recipe_engine.founder_runtime.ids import hash_payload, stable_id
 from recipe_engine.founder_runtime.intent.constraints import AuthorityEnvelope
-from recipe_engine.founder_runtime.runtime.approvals import gated_action_for
+from recipe_engine.founder_runtime.runtime.approvals import (
+    assert_approval_usable,
+    gated_action_for,
+)
 from recipe_engine.founder_runtime.runtime.completion import verify_completion
 from recipe_engine.founder_runtime.state.states import MissionState
 from recipe_engine.founder_runtime.strategy import generate_candidate_strategies
@@ -164,7 +167,7 @@ class OrganReader:
                     "CONFIGURATION_MISSING",
                     "live organ reader requires an injected read-only executor",
                 )
-            missing = sorted({"mother", "github", "vault", "qdrant"} - set(organs))
+            missing = sorted({"mother", "github", "vault", "qdrant", "governance"} - set(organs))
             if missing:
                 raise LongHorizonError(
                     "CONFIGURATION_MISSING",
@@ -174,6 +177,7 @@ class OrganReader:
             self._github = organs["github"]
             self._vault = organs["vault"]
             self._qdrant = organs["qdrant"]
+            self._governance = organs["governance"]
             return
 
         from recipe_engine.founder_runtime.adapters.fixture_axon import FixtureAxon
@@ -187,6 +191,7 @@ class OrganReader:
         self._github = organs.get("github") or FixtureGitHub(mode="fixture")
         self._vault = organs.get("vault") or FixtureVault(mode="fixture")
         self._qdrant = organs.get("qdrant") or FixtureQdrant(mode="fixture")
+        self._governance = organs.get("governance") or FixtureGovernance(mode="fixture")
         self.executor = executor or FixtureAxon(mode="fixture")
 
     def _meta(self, mission_id: str, observed_at: str, step: str) -> AdapterRequestMeta:
@@ -212,6 +217,92 @@ class OrganReader:
             error_code=getattr(result, "error_code", None) or str(status),
             payload=payload,
         )
+
+    def governance_decision(
+        self,
+        mission_id: str,
+        observed_at: str,
+        *,
+        authority_class: AuthorityClass,
+        action: str,
+        scope: str,
+        step: str,
+        policy_version: str = "",
+    ) -> dict[str, Any]:
+        """Ask the governing organ to decide one exact action. Fails closed.
+
+        The two backends answer different shapes — the fixture returns a policy
+        opinion dict, the live adapter returns an AdapterResult carrying a real
+        audit id from autonomous-governance-core — so this is where they are
+        normalized to ``{reference, contract, decision}``.  It is a seam, not a
+        client: the live Governance client already exists and is injected.
+
+        Every live failure path lands in the same place.  Denied, unreachable,
+        timed out, malformed, or an adapter that answered with anything other
+        than SUCCESS all raise AuthorityDenied.  There is deliberately no branch
+        that returns a permissive default, because that is the shape of the
+        defect this replaces: authority that resolves locally when the
+        authority organ cannot be reached is not authority.
+        """
+        meta = self._meta(mission_id, observed_at, step)
+        if self.mode != "live":
+            decision = self._governance.decide(
+                authority_class, action=action, scope=scope, meta=meta,
+            )
+            return {
+                "reference": (
+                    f"fixture_gov:{decision['decision_id']}:"
+                    f"{decision['authority_class']}:{decision['decision']}"
+                ),
+                "contract": decision,
+                "decision": decision["decision"],
+            }
+
+        gov_action = GovernanceAction(
+            action_id=stable_id("govact", mission_id, action, scope),
+            actor="founder_runtime",
+            tool="observe",
+            domain="organism_status",
+            summary=f"{action} [{scope}]",
+            tags=("read_only", "founder_runtime"),
+        )
+        try:
+            result = self._governance.decide(
+                gov_action,
+                trusted_authority_class=authority_class,
+                trusted_policy_version=policy_version,
+                meta=meta,
+            )
+        except Exception as exc:  # noqa: BLE001 — an unreachable authority is a denial
+            raise AuthorityDenied(
+                "live governance unreachable",
+                {"action": action, "scope": scope, "cause": type(exc).__name__},
+            ) from exc
+
+        if getattr(result, "status", None) != "success":
+            raise AuthorityDenied("live governance did not decide", {
+                "action": action,
+                "scope": scope,
+                "adapter_status": str(getattr(result, "status", "unknown")),
+                "error_code": getattr(result, "error_code", None),
+            })
+        payload = dict(getattr(result, "payload", {}) or {})
+        audit_id = payload.get("audit_id")
+        decision = payload.get("decision")
+        if not audit_id or not decision:
+            raise AuthorityDenied("live governance response lacks a decision reference", {
+                "action": action, "scope": scope,
+            })
+        if decision != "allow":
+            raise AuthorityDenied("live governance denied the action", {
+                "action": action, "scope": scope,
+                "decision": str(decision), "audit_id": str(audit_id),
+            })
+        return {
+            "reference": f"gov:{audit_id}:{authority_class.value}:{decision}",
+            "contract": payload,
+            "decision": decision,
+        }
 
     def health(self, mission_id: str, observed_at: str) -> SourceObservation:
         try:
@@ -398,13 +489,16 @@ def run_long_horizon_mission(
         runtime.checkpoint(mid, completed_steps=[], pending_steps=list(LONG_HORIZON_STAGES),
                            active_step=None, last_receipt=None, kind="before_context_handoff")
         runtime.transition(mid, MissionState.PLANNING, reason="begin_planning")
-        _pass_authority_gate(runtime, mid, mode=mode)
+        if not _pass_authority_gate(runtime, mid, mode=mode, reader=reader):
+            return _awaiting_approval_result(runtime, mid, mode=mode)
         runtime.transition(mid, MissionState.EXECUTING, reason="execute_read_only_stages")
         state = runtime.get_mission(mid).current_state
 
     if state == MissionState.AWAITING_APPROVAL:
-        # Resumed while parked on the approval gate.
-        _pass_authority_gate(runtime, mid, mode=mode)
+        # Resumed while parked on the approval gate. Resume re-enters the gate;
+        # it never inherits a pass from the run that parked here.
+        if not _pass_authority_gate(runtime, mid, mode=mode, reader=reader):
+            return _awaiting_approval_result(runtime, mid, mode=mode)
         runtime.transition(mid, MissionState.EXECUTING, reason="execute_read_only_stages")
 
     mission = runtime.get_mission(mid)
@@ -447,25 +541,145 @@ def run_long_horizon_mission(
     return _complete(ctx, executed=executed, done=done)
 
 
-def _pass_authority_gate(runtime, mission_id: str, *, mode: str) -> None:
-    """Route the mission through its own approval gate when one is required.
+# The actor string this mission puts in every approval it requests.  It exists
+# so that an approval carrying it can be RECOGNISED and REFUSED in live mode: an
+# approval whose requester is the mission is, by definition, not external.
+MISSION_ACTOR = "founder_runtime_long_horizon"
+
+# The only decider a live mission will accept an ALLOW from is one that is not
+# itself.  Live approvals are minted by the operator API process out of band
+# (bearer-authenticated, one terminal decision per mission/scope) and are found
+# here already durable in the store.
+FIXTURE_DECIDER = "fixture_harness:auto"
+
+
+def _external_allow_for(runtime, mission_id: str, *, action: str, scope: str, now_iso: str):
+    """The externally-decided ALLOW for this exact action, or None.
+
+    Never creates one.  It only recognises an approval that some other process
+    already recorded, and it applies the full consumption contract before
+    calling it usable, so a stale, expired, denied, mis-scoped, mis-actioned or
+    already-consumed record parks the mission exactly as an absent one does.
+
+    An approval requested by this mission is rejected outright regardless of how
+    well-formed it is.  That is the invariant: a mission may not be the origin
+    of the decision that authorizes it.
+    """
+    for approval in runtime.store.list_approvals(mission_id):
+        if approval.requested_by == MISSION_ACTOR:
+            continue
+        if approval.decided_by in (None, "", MISSION_ACTOR):
+            continue
+        try:
+            assert_approval_usable(
+                approval,
+                mission_id=mission_id,
+                action=action,
+                scope=scope,
+                now_iso=now_iso,
+            )
+        except FounderRuntimeError:
+            continue
+        return approval
+    return None
+
+
+def _awaiting_approval_result(runtime, mission_id: str, *, mode: str) -> dict[str, Any]:
+    """The parked result. A mission stops here until someone else decides."""
+    mission = runtime.get_mission(mission_id)
+    action, scope = gated_action_for(MissionState.AWAITING_APPROVAL, MissionState.QUEUED)
+    return {
+        "mission_id": mission_id,
+        "status": "awaiting_approval",
+        "mode": mode,
+        "state": mission.current_state.value,
+        "required_action": action,
+        "required_scope": scope,
+        "authority_class": mission.authority_requirements[0].authority_class.value,
+        "self_approval_created": False,
+        "db_path": str(runtime.store.path),
+    }
+
+
+def _pass_authority_gate(runtime, mission_id: str, *, mode: str, reader: "OrganReader") -> bool:
+    """Route the mission through its approval gate. Returns False when parked.
 
     The classification is the trusted kernel's, not a model's.  When the
     contract says approval is required, the mission parks in AWAITING_APPROVAL
     and only a recorded, exact-action approval moves it on.  Approval records
     authority state; it never confers execution.
+
+    What changed here is the ORIGIN of that approval.  This function used to
+    construct an Approval with decision=ALLOW, decided_by="founder" and a 2099
+    expiry, record it, and then consume it to open its own gate — so the process
+    asking permission was also the process granting it, and the gate proved
+    nothing.  In live mode the mission now never constructs an approval at all.
+    It looks for one an external decider already recorded; finding none, it
+    parks and returns False.
+
+    Governance is consulted before that approval is consumed, so both authority
+    facts must hold: the system policy organ must permit the action AND an
+    external human decision must exist for it.  Either one alone is not enough.
     """
     mission = runtime.get_mission(mission_id)
     requirement = mission.authority_requirements[0]
     if not requirement.requires_approval:
         runtime.transition(mission_id, MissionState.QUEUED, reason="queued_read_only")
-        return
+        return True
 
     if mission.current_state != MissionState.AWAITING_APPROVAL:
         runtime.transition(mission_id, MissionState.AWAITING_APPROVAL,
                            reason="authority_requires_approval")
     action, scope = gated_action_for(MissionState.AWAITING_APPROVAL, MissionState.QUEUED)
     now = runtime.clock.now_iso()
+
+    # 1. Consequence authority first. Governance decides whether this action is
+    #    permissible at all, before anyone is asked to approve it and before any
+    #    approval already sitting in the store is looked at. A denial, a timeout,
+    #    an unreachable organ or a malformed answer all raise from here, so the
+    #    mission cannot reach its approval on a run where authority was never
+    #    established. This ordering is why a parked mission has still genuinely
+    #    contacted Governance.
+    reader.governance_decision(
+        mission_id,
+        now,
+        authority_class=requirement.authority_class,
+        action=action,
+        scope=scope,
+        step="authority_gate",
+        policy_version=requirement.policy_version or "",
+    )
+
+    # 2. Then the human decision, which must already exist and must have come
+    #    from somewhere other than this process.
+    approval = _external_allow_for(
+        runtime, mission_id, action=action, scope=scope, now_iso=now,
+    )
+    if approval is None:
+        if mode == "live":
+            # Parked. No self-issued ALLOW, no default-open, no local fallback.
+            return False
+        approval = _record_fixture_approval(
+            runtime, mission_id, requirement=requirement,
+            action=action, scope=scope, now_iso=now,
+        )
+
+    # 3. One-shot consumption happens inside the transition, under the existing
+    #    consumption contract (mission/action/scope/expiry/consumed checks).
+    runtime.transition(mission_id, MissionState.QUEUED, reason="approved_read_only",
+                       approval_id=approval.approval_id)
+    return True
+
+
+def _record_fixture_approval(runtime, mission_id: str, *, requirement, action: str,
+                             scope: str, now_iso: str) -> Approval:
+    """A fixture-mode approval, deliberately shaped so it cannot pass for live.
+
+    ``requested_by``/``decided_by`` name the harness, not a founder, so if this
+    record ever appeared in a live store ``_external_allow_for`` would still see
+    a self-requested approval and refuse it.  The expiry is real rather than the
+    2099 sentinel the self-approving version used.
+    """
     approval = Approval(
         schema_version=SCHEMA_APPROVAL,
         approval_id=stable_id("appr", mission_id, action),
@@ -473,20 +687,19 @@ def _pass_authority_gate(runtime, mission_id: str, *, mode: str) -> None:
         action_class=requirement.authority_class.value,
         exact_requested_action=action,
         scope=scope,
-        requested_by="founder_runtime_long_horizon",
-        decided_by="founder",
+        requested_by=MISSION_ACTOR,
+        decided_by=FIXTURE_DECIDER,
         decision=ApprovalDecision.ALLOW,
-        conditions=["read_only", "no_production_mutation", "no_outbound_communication"],
-        expiry="2099-01-01T00:00:00.000Z",
+        conditions=["read_only", "no_production_mutation", "no_outbound_communication",
+                    "fixture_mode_only"],
+        expiry=None,
         evidence_refs=[],
-        created_at=now,
-        decided_at=now,
+        created_at=now_iso,
+        decided_at=now_iso,
         idempotency_key=f"approval:{mission_id}:{action}",
     )
     approval.compute_hash()
-    recorded = runtime.record_approval(approval)
-    runtime.transition(mission_id, MissionState.QUEUED, reason="approved_read_only",
-                       approval_id=recorded.approval_id)
+    return runtime.record_approval(approval)
 
 
 @dataclass
@@ -619,25 +832,23 @@ class _StageContext:
         performs exactly one read-only observation, which is A0, and the receipt
         attests that action alone.  Both facts are recorded: the mission-level
         gate as a consumed approval event, the step-level authority here.
+
+        Both modes now route through the injected governing organ.  In live mode
+        that is a real call to autonomous-governance-core and the reference is
+        its audit id; the previous ``not_claimed_by_governance`` literal was not
+        a reference to anything, it was the marker of a step that had never
+        asked.  A live step whose authority cannot be established raises rather
+        than stamping a placeholder onto a receipt.
         """
-        if self.mode == "live":
-            # Live receipts are not governed by the fixture policy table; the
-            # live adapter stamps not_claimed_by_governance and the real
-            # Governance organ remains the only authority.
-            return {"reference": "not_claimed_by_governance", "contract": None}
-        gov = FixtureGovernance(mode="fixture")
-        decision = gov.decide(
-            AuthorityClass.A0,
+        scope = "live_read_only_observation" if self.mode == "live" else "local_fixture"
+        return self.reader.governance_decision(
+            self.mission_id,
+            self.runtime.clock.now_iso(),
+            authority_class=AuthorityClass.A0,
             action="read_only_observation",
-            scope="local_fixture",
+            scope=scope,
+            step="step_authority",
         )
-        return {
-            "reference": (
-                f"fixture_gov:{decision['decision_id']}:"
-                f"{decision['authority_class']}:{decision['decision']}"
-            ),
-            "contract": decision,
-        }
 
     # -- stages -----------------------------------------------------------
     def _handlers(self) -> dict[str, Any]:
