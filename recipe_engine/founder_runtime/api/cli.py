@@ -62,6 +62,19 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--expected-version", type=int, default=None,
                    help="mission version to reject at (default: current version, fetched first)")
 
+    ga = sub.add_parser("approve-gate",
+                        help="Approve the mission AUTHORITY gate (signs the artifact Governance verifies)")
+    ga.add_argument("--mission", required=True)
+    ga.add_argument("--reason", default="")
+    ga.add_argument("--expected-version", type=int, default=None,
+                    help="mission version to approve at (default: current version, fetched first)")
+
+    gr = sub.add_parser("reject-gate", help="Reject the mission AUTHORITY gate with a reason")
+    gr.add_argument("--mission", required=True)
+    gr.add_argument("--reason", required=True)
+    gr.add_argument("--expected-version", type=int, default=None,
+                    help="mission version to reject at (default: current version, fetched first)")
+
     pa = sub.add_parser("pause", help="Pause a mission safely")
     pa.add_argument("--mission", required=True)
     pa.add_argument("--expected-version", type=int, default=None)
@@ -120,6 +133,16 @@ def main(argv: list[str] | None = None) -> int:
             if ver is None:
                 ver = _current_version(client, args.mission)
             _print(client.reject(args.mission, reason=args.reason, expected_version=ver))
+        elif args.command == "approve-gate":
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.approve_gate(args.mission, reason=args.reason, expected_version=ver))
+        elif args.command == "reject-gate":
+            ver = args.expected_version
+            if ver is None:
+                ver = _current_version(client, args.mission)
+            _print(client.reject_gate(args.mission, reason=args.reason, expected_version=ver))
         elif args.command == "pause":
             ver = args.expected_version
             if ver is None:

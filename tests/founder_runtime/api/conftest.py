@@ -43,6 +43,46 @@ def service(tmp_path):
 
 
 @pytest.fixture()
+def server_factory(tmp_path, token):
+    """Start a loopback server AFTER the caller has arranged the environment.
+
+    ``running_server`` builds its app during fixture setup, so a test that sets
+    GOVERNANCE_FOUNDER_SECRET in its own body is already too late: the signer is
+    read once at MissionService construction, which is exactly the production
+    contract. Tests about signing need to decide what the process can see BEFORE
+    the process exists, so they get a factory rather than a started server.
+    """
+    pytest.importorskip("fastapi", reason="HTTP transport requires fastapi")
+    uvicorn = pytest.importorskip("uvicorn", reason="HTTP transport requires uvicorn")
+    from recipe_engine.founder_runtime.api.app import create_app
+    started = []
+
+    def start(name: str = "missions"):
+        port = _free_port()
+        db = str(tmp_path / f"{name}.sqlite")
+        os.environ["FR_API_OPERATOR_TOKEN"] = token
+        app = create_app(db, probe_live=False)
+        cfg = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        server = uvicorn.Server(cfg)
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        started.append(server)
+        client = FounderRuntimeClient(token, port=port)
+        for _ in range(100):
+            try:
+                client.health()
+                break
+            except Exception:
+                time.sleep(0.05)
+        return client, port
+
+    yield start
+    for server in started:
+        server.should_exit = True
+    time.sleep(0.1)
+
+
+@pytest.fixture()
 def running_server(tmp_path, token):
     """Start a real loopback uvicorn server; yield (client, port)."""
     pytest.importorskip("fastapi", reason="HTTP transport requires fastapi")

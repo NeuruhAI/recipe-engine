@@ -106,6 +106,18 @@ class FounderRuntimeClient:
         return self._req("POST", f"/v1/missions/{mission_id}/reject", body={"reason": reason},
                          idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
 
+    # The authority gate is a different act from a plan decision: only a gate
+    # ALLOW carries the signed artifact a parked live mission can consume.
+    def approve_gate(self, mission_id: str, *, reason: str = "", idempotency_key: str | None = None,
+                     expected_version: int | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/gate/approve", body={"reason": reason},
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+
+    def reject_gate(self, mission_id: str, *, reason: str, idempotency_key: str | None = None,
+                    expected_version: int | None = None) -> dict:
+        return self._req("POST", f"/v1/missions/{mission_id}/gate/reject", body={"reason": reason},
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+
     def pause(self, mission_id: str, *, idempotency_key: str | None = None,
               expected_version: int | None = None) -> dict:
         return self._req("POST", f"/v1/missions/{mission_id}/pause",

@@ -140,6 +140,33 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
                                    idempotency_key=_idem_key(idempotency_key),
                                    expected_version=_expected_version(x_expected_version))
 
+    # ---- the mission authority gate --------------------------------------
+    # A plan decision and an authority decision are not the same act, and the
+    # kernel does not accept one for the other: assert_approval_usable demands
+    # the approval's exact_requested_action be the transition it is consumed
+    # for, so a `plan_decision:allow` can never unblock a parked mission.
+    # These two routes are how a human's gate decision reaches the mission from
+    # OUTSIDE the mission process. An ALLOW here is signed by this process — the
+    # only one holding the founder key — into the artifact Governance verifies;
+    # a DENY is recorded and signs nothing, because there is no such thing as a
+    # signed refusal, and minting one would create evidence that could be
+    # mistaken for permission. Neither route executes anything.
+    @app.post("/v1/missions/{mission_id}/gate/approve", dependencies=[Depends(require_auth)])
+    async def approve_gate(mission_id: str, body: DecisionBody,
+                           idempotency_key: str | None = Header(default=None),
+                           x_expected_version: int | None = Header(default=None)):
+        return service.approve_mission_gate(mission_id, reason=body.reason,
+                                            idempotency_key=_idem_key(idempotency_key),
+                                            expected_version=_expected_version(x_expected_version))
+
+    @app.post("/v1/missions/{mission_id}/gate/reject", dependencies=[Depends(require_auth)])
+    async def reject_gate(mission_id: str, body: DecisionBody,
+                          idempotency_key: str | None = Header(default=None),
+                          x_expected_version: int | None = Header(default=None)):
+        return service.reject_mission_gate(mission_id, reason=body.reason,
+                                           idempotency_key=_idem_key(idempotency_key),
+                                           expected_version=_expected_version(x_expected_version))
+
     @app.post("/v1/missions/{mission_id}/pause", dependencies=[Depends(require_auth)])
     async def pause(mission_id: str,
                     idempotency_key: str | None = Header(default=None),
