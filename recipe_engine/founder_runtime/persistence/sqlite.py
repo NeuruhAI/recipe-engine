@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,8 @@ _SYNCHRONOUS_LEVELS = frozenset({"OFF", "NORMAL", "FULL", "EXTRA"})
 class SqliteStore:
     """Local transactional store. path must be temp or gitignored developer path."""
 
-    def __init__(self, path: str | Path, *, wal: bool = True, synchronous: str = "FULL"):
+    def __init__(self, path: str | Path, *, wal: bool = True, synchronous: str = "FULL",
+                 check_same_thread: bool = True):
         self.path = Path(path)
         self._wal = wal
         # Durability level for the power-loss claim.  WAL defaults to NORMAL,
@@ -35,11 +37,14 @@ class SqliteStore:
         # host.  FULL fsyncs the WAL on every commit, which is what "survives
         # power loss" has to mean.  Tests may pass NORMAL for speed.
         self._synchronous = synchronous
+        self._check_same_thread = check_same_thread
+        # Serializes cross-thread access when check_same_thread=False (API server).
+        self._mutex = threading.RLock()
         self._conn: sqlite3.Connection | None = None
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path), isolation_level=None)
+        self._conn = sqlite3.connect(str(self.path), isolation_level=None, check_same_thread=self._check_same_thread)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         if self._wal:
@@ -214,6 +219,13 @@ class SqliteStore:
         rows = self._c().execute(
             f"SELECT body_json FROM missions WHERE current_state NOT IN ({placeholders})",
             terminal,
+        ).fetchall()
+        return [Mission.from_dict(json.loads(r["body_json"])) for r in rows]
+
+    def list_missions(self) -> list[Mission]:
+        """All missions, creation order. Read-only listing for the operator API."""
+        rows = self._c().execute(
+            "SELECT body_json FROM missions ORDER BY created_at ASC, mission_id ASC"
         ).fetchall()
         return [Mission.from_dict(json.loads(r["body_json"])) for r in rows]
 

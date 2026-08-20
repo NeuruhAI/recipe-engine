@@ -61,6 +61,7 @@ class MissionRuntime:
         clock: Clock | None = None,
         worker_id: str | None = None,
         adapter_mode: str = "fixture",
+        check_same_thread: bool = True,
     ):
         # The runtime declares which world its organs came from. It was pinned
         # to "fixture" and rejected anything else, which is now a false
@@ -80,7 +81,7 @@ class MissionRuntime:
         self.adapter_mode = adapter_mode
         self.clock = clock or SystemClock()
         self.worker_id = worker_id if worker_id is not None else default_worker_id()
-        self.store = SqliteStore(db_path)
+        self.store = SqliteStore(db_path, check_same_thread=check_same_thread)
         self.store.initialize()
         self.locks = LockManager(self.store, self.clock)
         self.workers = WorkerLeaseManager(self.store, self.clock)

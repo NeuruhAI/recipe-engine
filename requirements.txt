@@ -1,2 +1,8 @@
 requests>=2.32
 psycopg[binary]>=3.2
+
+# Founder Runtime operator API (recipe_engine/founder_runtime/api).
+# Only the HTTP transport needs these: MissionService, the operator auth and the
+# approval channel are pure Python and import without them.
+fastapi>=0.115
+uvicorn>=0.30
