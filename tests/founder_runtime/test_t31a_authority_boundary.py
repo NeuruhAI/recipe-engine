@@ -11,11 +11,20 @@ that an absent decision parks rather than defaults open, that the decision must
 come from somewhere else and be bound to this exact action, that Governance is
 genuinely consulted and every one of its failure modes closes the gate, and
 that neither resume nor restart can manufacture what a run could not.
+
+T31B tightened what "came from somewhere else" has to mean.  A record in this
+runtime's own store is evidence only to this runtime — it is exactly the kind of
+thing the process that benefits from it could have written.  So a live gate now
+also requires the founder's SIGNED artifact, which the external channel mints
+and Governance verifies, and submits it for authorization before the transition.
+An unsigned external record parks, and the harness below carries a signed one
+because that is now what an external decision IS.
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import sys
 import tempfile
 import unittest
@@ -32,9 +41,12 @@ from recipe_engine.founder_runtime.contracts.approval import (
     SCHEMA_APPROVAL,
 )
 from recipe_engine.founder_runtime.errors import AuthorityDenied, FounderRuntimeError
+from recipe_engine.founder_runtime.api.founder_signing import FounderApprovalSigner
 from recipe_engine.founder_runtime.missions.long_horizon import (
+    GOV_APPROVAL_REF_PREFIX,
     MISSION_ACTOR,
     OrganReader,
+    authorization_scope_key,
     run_long_horizon_mission,
 )
 from recipe_engine.founder_runtime.runtime.approvals import gated_action_for
@@ -42,6 +54,15 @@ from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
 from recipe_engine.founder_runtime.state.states import MissionState
 
 LH = ROOT / "recipe_engine" / "founder_runtime" / "missions" / "long_horizon.py"
+
+# The identity this harness attests. Governance is stubbed here, so what is
+# under test is the mission's own conduct: that it attests an identity at all,
+# binds the founder's artifact to it, and submits both.
+SOURCE_SHA = "949a8b8c99f2b111edf8c734f2cfcad89c47bdf2"
+# A signing key for the harness's stand-in decision channel. It is not a
+# credential: nothing here verifies it, because signature verification belongs
+# to Governance and is proved in that repository and in the live court.
+HARNESS_SIGNING_KEY = "t31b-harness-signing-key-not-a-credential"
 GATE_ACTION, GATE_SCOPE = gated_action_for(
     MissionState.AWAITING_APPROVAL, MissionState.QUEUED,
 )
@@ -64,6 +85,28 @@ class _Governance:
     def __init__(self, behaviour="allow"):
         self.behaviour = behaviour
         self.calls = []
+        self.authorizations = []
+
+    def authorize(self, facts, *, founder_approval, meta):
+        """Stands in for POST /v2/authorize.
+
+        Records what was submitted so a court can assert that the mission
+        presented the founder's artifact rather than something of its own.
+        """
+        self.authorizations.append({"facts": dict(facts), "founder_approval": founder_approval})
+        if self.behaviour == "authz_down":
+            raise ConnectionRefusedError("governance unreachable")
+        if self.behaviour == "authz_deny":
+            return _Result("success", {"authorization_id": "auth_x", "decision": "deny",
+                                       "reason_code": "SOURCE_SHA_SUPERSEDED"})
+        if self.behaviour == "authz_founder_required":
+            return _Result("success", {"authorization_id": "auth_f", "decision": "founder_required",
+                                       "reason_code": "FOUNDER_REQUIRED_NO_GRANT"})
+        if self.behaviour == "authz_malformed":
+            return _Result("success", {"unexpected": True})
+        return _Result("success", {"authorization_id": "auth_ok", "decision": "allow",
+                                   "reason_code": "FOUNDER_APPROVED_SCOPE_ONCE",
+                                   "risk_tier": "R0"})
 
     def decide(self, action, *, trusted_authority_class, trusted_policy_version, meta):
         self.calls.append(action)
@@ -90,13 +133,39 @@ def _run(rt, organs, *, key, max_stages=0):
     return run_long_horizon_mission(
         rt, mode="live", organs=organs, executor=object(),
         creation_idempotency_key=key, max_stages=max_stages,
+        source_sha=SOURCE_SHA,
     )
+
+
+def _signed_artifact(rt, mission_id, *, action, scope, source_sha=SOURCE_SHA):
+    """What the external channel mints: bound to the scope the MISSION published."""
+    signer = FounderApprovalSigner(HARNESS_SIGNING_KEY)
+    now = rt.clock.now_iso()
+    artifact = signer.sign_scope_once(
+        scope_key=authorization_scope_key(
+            mission_id, action=action, scope=scope, source_sha=source_sha,
+        ),
+        source_sha=source_sha,
+        issued_at=now,
+        expires_at="2026-12-31T00:00:00.000Z",
+    )
+    return GOV_APPROVAL_REF_PREFIX + json.dumps(artifact, sort_keys=True, separators=(",", ":"))
 
 
 def _external_allow(rt, mission_id, *, action=GATE_ACTION, scope=GATE_SCOPE,
                     mission=None, expiry=None, decision=ApprovalDecision.ALLOW,
-                    requested_by="founder", decided_by="jeramie", key="ext"):
-    """An approval as an out-of-band decider records it. Never by the mission."""
+                    requested_by="founder", decided_by="jeramie", key="ext",
+                    signed=True):
+    """An approval as an out-of-band decider records it. Never by the mission.
+
+    ``signed=True`` is the default because that is what an external decision now
+    IS: the channel's signature is the part a party other than the beneficiary
+    can check. Pass signed=False to prove that the unsigned record alone still
+    parks a live mission.
+    """
+    refs = []
+    if signed and decision == ApprovalDecision.ALLOW:
+        refs.append(_signed_artifact(rt, mission or mission_id, action=action, scope=scope))
     approval = Approval(
         schema_version=SCHEMA_APPROVAL,
         approval_id=f"appr_{key}",
@@ -109,7 +178,7 @@ def _external_allow(rt, mission_id, *, action=GATE_ACTION, scope=GATE_SCOPE,
         decision=decision,
         conditions=["read_only"],
         expiry=expiry,
-        evidence_refs=[],
+        evidence_refs=refs,
         created_at=rt.clock.now_iso(),
         decided_at=rt.clock.now_iso(),
         idempotency_key=f"approval:{key}",

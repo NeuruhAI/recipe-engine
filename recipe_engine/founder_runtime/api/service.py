@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,10 @@ from recipe_engine.autonomy.models import (
 )
 from recipe_engine.founder_runtime import RUNTIME_VERSION
 from recipe_engine.founder_runtime.adapters.fixture_governance import FixtureGovernance
+from recipe_engine.founder_runtime.api.founder_signing import (
+    APPROVAL_TTL_SECONDS,
+    FounderApprovalSigner,
+)
 from recipe_engine.founder_runtime.adapters.fixture_mother import FixtureMother
 from recipe_engine.founder_runtime.clock import SystemClock
 from recipe_engine.founder_runtime.contracts.approval import Approval, ApprovalDecision, SCHEMA_APPROVAL
@@ -37,6 +42,7 @@ from recipe_engine.founder_runtime.errors import (
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
 from recipe_engine.founder_runtime.ids import hash_payload, new_uuid, stable_id
+from recipe_engine.founder_runtime.missions.long_horizon import GOV_APPROVAL_REF_PREFIX
 from recipe_engine.founder_runtime.runtime.approvals import gated_action_for
 from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
 from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
@@ -66,6 +72,12 @@ _ALLOWED_NEXT = {
 _BLOCKED_ALWAYS = ["execute_plan", "external_action", "mutate_axon", "workers_dispatch", "production_persist"]
 
 
+def _iso_plus_seconds(iso: str, seconds: int) -> str:
+    """ISO-8601 UTC, `seconds` after `iso`, in the millisecond form Governance parses."""
+    base = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return (base + timedelta(seconds=seconds)).astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _iso_now(clock) -> str:
     return clock.now_iso()
 
@@ -82,11 +94,18 @@ class ApiError(Exception):
 class MissionService:
     """Owns the runtime and idempotency ledger. Single-writer via a lock."""
 
-    def __init__(self, db_path: str | Path, *, clock=None):
+    def __init__(self, db_path: str | Path, *, clock=None, signer=None):
         self.db_path = str(db_path)
         self.clock = clock or SystemClock()
         self._lock = threading.RLock()
         self.runtime = MissionRuntime(self.db_path, clock=self.clock, adapter_mode="fixture", check_same_thread=False)
+        # The founder's signing key lives on this side of the boundary and only
+        # this side. It is what turns a recorded decision into something a party
+        # other than the beneficiary can verify. With none configured the channel
+        # still records decisions honestly — it simply cannot mint a
+        # Governance-verifiable artifact, and a live mission parks rather than
+        # proceeding on an unsigned record.
+        self.signer = signer if signer is not None else FounderApprovalSigner()
         self._idem = sqlite3.connect(self._idem_path(), isolation_level=None, check_same_thread=False)
         self._idem.row_factory = sqlite3.Row
         self._idem.execute(
@@ -473,6 +492,19 @@ class MissionService:
                                {"state": mission.current_state.value})
             now = self.clock.now_iso()
             classified = mission.authority_requirements[0] if mission.authority_requirements else None
+            # A gate ALLOW is the founder's authority decision, so it carries the
+            # artifact Governance can verify. It is bound to the scope and source
+            # SHA the MISSION published — not to coordinates configured here —
+            # so the two processes cannot drift into signing one thing and
+            # presenting another. A DENY carries nothing: there is no such thing
+            # as a signed refusal to spend, and minting one would only create an
+            # artifact whose existence could be mistaken for permission.
+            evidence_refs = [mission.plan_id or ""]
+            signed_note = None
+            if gate and decision == ApprovalDecision.ALLOW:
+                signed_note = self._mint_gate_artifact(mission_id, action=requested_action, scope=scope, now=now)
+                if signed_note is not None:
+                    evidence_refs.append(signed_note)
             approval = Approval(
                 schema_version=SCHEMA_APPROVAL,
                 approval_id=new_uuid("appr"),
@@ -485,7 +517,7 @@ class MissionService:
                 decision=decision,
                 conditions=[reason] if reason else [],
                 expiry=None,
-                evidence_refs=[mission.plan_id or ""],
+                evidence_refs=evidence_refs,
                 created_at=now,
                 decided_at=now,
                 idempotency_key=idempotency_key,
@@ -511,6 +543,37 @@ class MissionService:
                       "note": "approval recorded; plan NOT executed (no mutation authority in V1)"}
             self._idem_store(idempotency_key, request_hash, result)
             return result
+
+    def _mint_gate_artifact(self, mission_id: str, *, action: str, scope: str, now: str) -> str | None:
+        """The signed Governance approval for this mission's published request.
+
+        Returns None — never a partial or improvised artifact — when the mission
+        has not published a request yet, when the published request is about a
+        different action or scope, or when this channel holds no signing key. In
+        every one of those cases the decision is still recorded truthfully and
+        the live mission simply parks, because an approval Governance cannot
+        verify is not authority and must not be dressed up as one.
+        """
+        published = self.runtime.published_authorization_request(mission_id)
+        if not published:
+            return None
+        if published.get("action") != action or published.get("scope") != scope:
+            return None
+        scope_key = published.get("scope_key")
+        source_sha = published.get("source_sha")
+        if not scope_key or not source_sha:
+            return None
+        if not self.signer.configured:
+            return None
+        expires_at = _iso_plus_seconds(now, APPROVAL_TTL_SECONDS)
+        artifact = self.signer.sign_scope_once(
+            scope_key=str(scope_key),
+            source_sha=str(source_sha),
+            issued_at=now,
+            expires_at=expires_at,
+            risk_tier=str(published.get("risk_tier") or "R0"),
+        )
+        return GOV_APPROVAL_REF_PREFIX + json.dumps(artifact, sort_keys=True, separators=(",", ":"))
 
     def approve_plan(self, mission_id: str, *, reason: str, idempotency_key: str,
                      expected_version: int | None = None) -> dict[str, Any]:

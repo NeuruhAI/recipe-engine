@@ -33,6 +33,7 @@ exactly what triggers the replan.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Mapping, Sequence
@@ -53,6 +54,13 @@ from recipe_engine.autonomy.models import (
     SV_OPPORTUNITY,
 )
 from recipe_engine.founder_runtime.adapters.fixture_governance import FixtureGovernance
+from recipe_engine.founder_runtime.adapters.governance_authorization import (
+    EXPECTED_RISK_TIER,
+    FOUNDER_APPROVAL_SCHEMA_VERSION,
+    SCOPE_ONCE,
+    authorization_facts,
+    scope_key_for,
+)
 from recipe_engine.founder_runtime.adapters.protocols import AdapterRequestMeta, GovernanceAction
 from recipe_engine.founder_runtime.contracts.authority import AuthorityClass
 from recipe_engine.founder_runtime.contracts.approval import (
@@ -151,12 +159,24 @@ class OrganReader:
     """
 
     def __init__(self, mode: str, *, organs: Mapping[str, Any] | None = None,
-                 executor: Any = None):
+                 executor: Any = None, source_sha: str = ""):
         if mode not in ("fixture", "live"):
             raise LongHorizonError("ADAPTER_MODE_INVALID", f"unsupported organ reader mode: {mode}")
         self.mode = mode
         self.executor = executor
+        # The source SHA this runtime attests to Governance. It is INJECTED, not
+        # discovered: the mission cannot read a repository or an environment to
+        # find out what it is (the confinement scan forbids exactly that), so it
+        # can only state what the composition root outside this package told it.
+        # A live run with nothing to attest is refused rather than sent with a
+        # blank or guessed identity.
+        self.source_sha = source_sha
         if mode == "live":
+            if not source_sha or len(source_sha) < 7:
+                raise LongHorizonError(
+                    "CONFIGURATION_MISSING",
+                    "live organ reader requires an attested source SHA; identity is never guessed",
+                )
             if not organs:
                 raise LongHorizonError(
                     "CONFIGURATION_MISSING",
@@ -304,6 +324,89 @@ class OrganReader:
             "decision": decision,
         }
 
+    def governance_authorization(
+        self,
+        mission_id: str,
+        observed_at: str,
+        *,
+        facts: Mapping[str, Any],
+        founder_approval: Mapping[str, Any] | None,
+        step: str,
+    ) -> dict[str, Any]:
+        """Ask Governance to AUTHORIZE this exact action. Fails closed.
+
+        ``governance_decision`` asks whether this class of action is permissible
+        at all.  This asks the different, stronger question: whether THIS exact
+        action, from THIS attested source SHA, backed by THIS externally decided
+        founder approval, is authorized — once.
+
+        The two are not interchangeable and neither is skipped.  A policy
+        evaluation that says "this kind of thing is fine" is not authority over
+        a particular act, and an authorization for a particular act does not
+        mean the policy still permits its class.
+
+        Every failure lands in the same place. Denied, founder_required,
+        unreachable, timed out, malformed, or an adapter that answered with
+        anything other than SUCCESS all raise AuthorityDenied. There is no
+        branch that resolves permissively when the authority organ cannot be
+        reached, because authority that resolves locally is not authority.
+        """
+        meta = self._meta(mission_id, observed_at, step)
+        if self.mode != "live":
+            # Fixture mode has no authorization surface to reach and does not
+            # pretend to: it says so, rather than fabricating an authorization
+            # id that would read like a real one in a receipt.
+            return {
+                "reference": f"fixture_gov_authz:{facts['action_id']}",
+                "decision": "allow",
+                "contract": {"mode": "fixture", "execution": "NOT_CLAIMED_BY_GOVERNANCE"},
+            }
+
+        authorize = getattr(self._governance, "authorize", None)
+        if authorize is None:
+            raise AuthorityDenied("live governance organ cannot authorize", {
+                "action_id": facts["action_id"],
+                "organ": type(self._governance).__name__,
+            })
+
+        try:
+            result = authorize(facts, founder_approval=founder_approval, meta=meta)
+        except Exception as exc:  # noqa: BLE001 — an unreachable authority is a denial
+            raise AuthorityDenied("live governance authorization unreachable", {
+                "action_id": facts["action_id"], "cause": type(exc).__name__,
+            }) from exc
+
+        if getattr(result, "status", None) != "success":
+            raise AuthorityDenied("live governance did not authorize", {
+                "action_id": facts["action_id"],
+                "adapter_status": str(getattr(result, "status", "unknown")),
+                "error_code": getattr(result, "error_code", None),
+            })
+
+        payload = dict(getattr(result, "payload", {}) or {})
+        decision = payload.get("decision")
+        authorization_id = payload.get("authorization_id")
+        if not decision or not authorization_id:
+            raise AuthorityDenied("live governance authorization lacks a reference", {
+                "action_id": facts["action_id"],
+            })
+        if decision != "allow":
+            # founder_required is a refusal here, not an invitation: this
+            # mission has already been through its external decision channel,
+            # and a Governance ask for a founder is an authority state the
+            # mission cannot resolve by itself.
+            raise AuthorityDenied("live governance refused the authorization", {
+                "action_id": facts["action_id"],
+                "decision": str(decision),
+                "reason_code": str(payload.get("reason_code")),
+                "authorization_id": str(authorization_id),
+            })
+        return {
+            "reference": f"gov_authz:{authorization_id}:{payload.get('risk_tier')}:{decision}",
+            "decision": decision,
+            "contract": payload,
+        }
+
     def health(self, mission_id: str, observed_at: str) -> SourceObservation:
         try:
             res = self._mother.health_result(
@@ -447,6 +550,7 @@ def run_long_horizon_mission(
     creation_idempotency_key: str = "long-horizon",
     stop_after_stage: str | None = None,
     max_stages: int | None = None,
+    source_sha: str = "",
 ) -> dict[str, Any]:
     """Run — or resume — the long-horizon read-only mission.
 
@@ -457,7 +561,7 @@ def run_long_horizon_mission(
     property of the design rather than a claim: a stage's receipt IS the record
     that it ran, and a stage is never executed while its receipt exists.
     """
-    reader = OrganReader(mode, organs=organs, executor=executor)
+    reader = OrganReader(mode, organs=organs, executor=executor, source_sha=source_sha)
     envelope = (AuthorityEnvelope.READ_ONLY_LIVE if mode == "live"
                 else AuthorityEnvelope.READ_ONLY_FIXTURE)
 
@@ -551,6 +655,77 @@ MISSION_ACTOR = "founder_runtime_long_horizon"
 # (bearer-authenticated, one terminal decision per mission/scope) and are found
 # here already durable in the store.
 FIXTURE_DECIDER = "fixture_harness:auto"
+
+# The lane this mission's authority gate is about. It is part of the scope the
+# founder's signature covers, so both processes must spell it identically.
+AUTHORIZATION_LANE = "founder-runtime-long-horizon"
+
+# How the external channel carries the signed Governance approval on the record
+# it writes. evidence_refs is inside the approval hash, so the artifact cannot be
+# swapped after the fact without breaking that hash — and even if it were, the
+# signature is over Governance's own canonical payload and would simply fail
+# there instead.
+GOV_APPROVAL_REF_PREFIX = "gov.founder.approval.v1="
+
+
+def governance_approval_from(approval) -> dict[str, Any] | None:
+    """The signed Governance approval carried by an external decision, if any.
+
+    Returns None rather than raising: an approval record without one is not
+    malformed, it is simply not usable to authorize a live mission, and the
+    caller parks exactly as it does for an absent approval.
+    """
+    for ref in approval.evidence_refs:
+        if not isinstance(ref, str) or not ref.startswith(GOV_APPROVAL_REF_PREFIX):
+            continue
+        try:
+            artifact = json.loads(ref[len(GOV_APPROVAL_REF_PREFIX):])
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(artifact, dict):
+            return None
+        if artifact.get("schema_version") != FOUNDER_APPROVAL_SCHEMA_VERSION:
+            return None
+        if artifact.get("mode") != SCOPE_ONCE:
+            return None
+        if not isinstance(artifact.get("signature"), str) or not artifact["signature"]:
+            return None
+        return artifact
+    return None
+
+
+def authorization_request_for(mission_id: str, *, action: str, scope: str,
+                              source_sha: str, nonce: str, issued_at: str) -> dict[str, Any]:
+    """The exact facts this mission presents for its authority gate.
+
+    Built from the mission's own coordinates so the external channel can derive
+    the identical scope without the two processes having to exchange anything
+    but the mission id.
+    """
+    return authorization_facts(
+        lane=AUTHORIZATION_LANE,
+        action_id=stable_id("govauthz", mission_id, action, scope),
+        summary=f"{action} [{scope}]",
+        source_sha=source_sha,
+        nonce=nonce,
+        issued_at=issued_at,
+    )
+
+
+def authorization_scope_key(mission_id: str, *, action: str, scope: str, source_sha: str) -> str:
+    """The scope key both processes must agree on, from mission coordinates alone.
+
+    ``source_sha`` is taken because the facts require one, and deliberately does
+    NOT affect the result: Governance's scope key covers the action coordinates,
+    not the runtime version.  That separation is the reason a scope_once approval
+    also binds ``source_sha`` explicitly — without it an approval for the same
+    lane and target would survive a source advance unnoticed, because the scope
+    alone cannot tell two versions apart.
+    """
+    return scope_key_for(authorization_request_for(
+        mission_id, action=action, scope=scope, source_sha=source_sha,
+        nonce="x" * 24, issued_at="1970-01-01T00:00:00.000Z",
+    ))
 
 
 def _external_allow_for(runtime, mission_id: str, *, action: str, scope: str, now_iso: str):
@@ -650,6 +825,25 @@ def _pass_authority_gate(runtime, mission_id: str, *, mode: str, reader: "OrganR
         policy_version=requirement.policy_version or "",
     )
 
+    # 1b. Publish what this mission will ask Governance to authorize, so the
+    #     external decision channel signs THIS scope and THIS attested source
+    #     SHA rather than a separately configured guess at them. The mission is
+    #     the party that will present them, so it is the party that states them.
+    runtime.record_authorization_request(mission_id, {
+        "mission_id": mission_id,
+        "action": action,
+        "scope": scope,
+        "source_sha": reader.source_sha,
+        "scope_key": authorization_scope_key(
+            mission_id, action=action, scope=scope, source_sha=reader.source_sha,
+        ),
+        "risk_tier": EXPECTED_RISK_TIER,
+        "component": "founder_runtime",
+        "lane": AUTHORIZATION_LANE,
+        "action_class": "status",
+        "mode": mode,
+    })
+
     # 2. Then the human decision, which must already exist and must have come
     #    from somewhere other than this process.
     approval = _external_allow_for(
@@ -664,8 +858,38 @@ def _pass_authority_gate(runtime, mission_id: str, *, mode: str, reader: "OrganR
             action=action, scope=scope, now_iso=now,
         )
 
-    # 3. One-shot consumption happens inside the transition, under the existing
+    # 3. Then the authority grant itself. Steps 1 and 2 established that the
+    #    policy permits this class of action and that a human outside this
+    #    process decided about it. Neither of those is authority over the
+    #    particular act, and the founder's decision is so far only a record in
+    #    this runtime's own store — something this process could in principle
+    #    have written. Presenting the founder's SIGNED artifact to Governance is
+    #    what makes it verifiable by someone other than the party it benefits:
+    #    Governance checks the signature, the attested source SHA, the scope,
+    #    the tier and the expiry, and spends the approval exactly once.
+    #
+    #    In live mode a missing signed artifact parks the mission. It does not
+    #    fall back to the unsigned record, because the whole point of the
+    #    signature is that the store record alone is not evidence.
+    governance_approval = governance_approval_from(approval)
+    if mode == "live" and governance_approval is None:
+        return False
+
+    facts = authorization_request_for(
+        mission_id, action=action, scope=scope,
+        source_sha=reader.source_sha,
+        nonce=stable_id("authznonce", mission_id, action, now)[:32],
+        issued_at=now,
+    )
+    reader.governance_authorization(
+        mission_id, now, facts=facts,
+        founder_approval=governance_approval, step="authority_gate",
+    )
+
+    # 4. One-shot consumption happens inside the transition, under the existing
     #    consumption contract (mission/action/scope/expiry/consumed checks).
+    #    Governance has already spent the signed approval on its own ledger, so
+    #    the artifact is dead there too: a second run cannot re-present it.
     runtime.transition(mission_id, MissionState.QUEUED, reason="approved_read_only",
                        approval_id=approval.approval_id)
     return True

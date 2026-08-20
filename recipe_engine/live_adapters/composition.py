@@ -14,7 +14,7 @@ read settings and construct live adapters; the mission it hands them to cannot.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Mapping
 
 from recipe_engine.live_adapters.live_axon import LiveAxonReadonlyAdapter
 from recipe_engine.live_adapters.live_github import LiveGitHubAdapter
@@ -67,6 +67,39 @@ def build_default_live_settings() -> LiveAdapterSettings:
     )
 
 
+class FounderSecretVisibleToMission(RuntimeError):
+    """The mission role can see the founder signing key. Refuse to run."""
+
+
+def assert_mission_cannot_sign(env: Mapping[str, str] | None = None) -> None:
+    """Refuse to build a live mission in a process that could sign for itself.
+
+    T31A removed the mission's ability to mint its own ALLOW. Cryptography could
+    put it straight back: a mission process holding the founder signing key
+    would not be self-approving in the old obvious way, it would be self-
+    approving with a valid signature, which is worse because Governance would
+    verify it.
+
+    So the mission role refuses the key rather than merely declining to use it.
+    Same host and same user as the approval channel, so this is a process-role
+    boundary, not an OS one — it does not claim a compromised mission process
+    could never read the file, only that a mission never runs live while holding
+    the key, and fails closed instead of proceeding if the environment says
+    otherwise.
+    """
+    from recipe_engine.founder_runtime.api.founder_signing import (
+        ENV_FOUNDER_SECRET,
+        secret_is_present,
+    )
+
+    if secret_is_present(env):
+        raise FounderSecretVisibleToMission(
+            f"{ENV_FOUNDER_SECRET} is visible to this process; a mission process must not "
+            "hold the founder signing key. Run the mission without it — the external "
+            "approval channel is the only party entitled to sign."
+        )
+
+
 def build_live_organs(settings: LiveAdapterSettings) -> dict[str, Any]:
     """The read-only organs a long-horizon mission observes.
 
@@ -82,7 +115,11 @@ def build_live_organs(settings: LiveAdapterSettings) -> dict[str, Any]:
     composition root omits it there is no authority in the live path at all.
     It is read-only here too: the adapter observes a decision and stamps
     NOT_CLAIMED_BY_GOVERNANCE; it never requests or consumes mutation authority.
+    It can now also SUBMIT a founder approval to /v2/authorize, which is why the
+    first thing this function does is refuse to build anything at all in a
+    process that could have signed one.
     """
+    assert_mission_cannot_sign()
     return {
         "mother": LiveMotherAdapter(settings),
         "github": LiveGitHubAdapter(settings),

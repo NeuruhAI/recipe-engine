@@ -40,6 +40,11 @@ API_BOUNDARY_ALLOWED_IMPORTS = {
 API_BOUNDARY_ALLOWED_PATH_IO = {
     "recipe_engine.founder_runtime.api.auth": {"read_text"},  # operator token file (FR_API_OPERATOR_TOKEN_FILE)
     "recipe_engine.founder_runtime.api.openapi": {"write_text"},  # emit machine-readable OpenAPI contract
+    # T31B: the founder signing key, on the EXTERNAL DECISION side of the
+    # boundary. Same shape as the operator token above — an operator-owned file
+    # read once at construction, never returned, never logged. The mission side
+    # holds no key at all and refuses to run live if it can see one.
+    "recipe_engine.founder_runtime.api.founder_signing": {"read_text"},
 }
 
 

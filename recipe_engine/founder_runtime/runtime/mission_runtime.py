@@ -702,6 +702,43 @@ class MissionRuntime:
         )
         return outcome
 
+    AUTHORIZATION_REQUEST_KEY = "authorization_request"
+
+    def record_authorization_request(self, mission_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        """Publish the exact authorization this mission will ask Governance for.
+
+        A parked mission and the external decision channel are different
+        processes, so the founder's signature has to cover something both can
+        compute.  Rather than configuring the same coordinates twice — which is
+        just a drift waiting to happen — the mission publishes what it will ask
+        for, and the channel signs exactly that.  There is one source of truth
+        for the scope and for the source SHA, and it is the party that will
+        actually present them.
+
+        Publishing is idempotent on the scope: re-entering the gate republishes
+        nothing, so a resumed mission cannot accumulate competing requests for
+        the founder to have signed the wrong one of.
+        """
+        published = self.published_authorization_request(mission_id)
+        if published is not None and published.get("scope_key") == request.get("scope_key"):
+            return published
+        self._record_same_state_event(
+            mission_id, EventType.GOVERNANCE_RECORDED, "authorization_request_published",
+            {self.AUTHORIZATION_REQUEST_KEY: dict(request)},
+            f"authz-request:{request['scope_key']}",
+            evidence_refs=[str(request["scope_key"])],
+        )
+        return dict(request)
+
+    def published_authorization_request(self, mission_id: str) -> dict[str, Any] | None:
+        """The most recently published authorization request, or None."""
+        found = None
+        for event in self.store.list_events(mission_id):
+            payload = event.payload or {}
+            if event.event_type == EventType.GOVERNANCE_RECORDED and self.AUTHORIZATION_REQUEST_KEY in payload:
+                found = dict(payload[self.AUTHORIZATION_REQUEST_KEY])
+        return found
+
     def record_governance(self, mission_id: str, decision: dict[str, Any]) -> Mission:
         return self._record_same_state_event(
             mission_id, EventType.GOVERNANCE_RECORDED, "fixture_governance_opinion_recorded",

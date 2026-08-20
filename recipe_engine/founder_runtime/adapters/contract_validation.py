@@ -501,6 +501,61 @@ def validate_governance_decision(payload: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value)
 
 
+AUTHORIZATION_DECISIONS = frozenset({"allow", "deny", "founder_required"})
+
+
+def validate_governance_authorization(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Required-key validation for a Governance V2 authorization envelope.
+
+    An authorization is the strongest answer this runtime ever asks for, so the
+    shape of the answer is checked before any field of it is believed.  A reply
+    that is missing its decision, its reason, its receipt hash or its execution
+    marker is not a weak allow — it is an answer we cannot read, and an answer
+    we cannot read is a denial.
+
+    ``execution`` must still say NOT_CLAIMED_BY_GOVERNANCE.  Governance decides;
+    it never executes, and an envelope claiming otherwise is refused rather than
+    quietly accepted as a stronger permission than the contract grants.
+    """
+    value = _require_mapping(payload, "Governance authorization")
+    required = {
+        "schema_version", "authorization_id", "decision", "reason_code",
+        "reasons", "risk_tier", "canonical_facts_hash", "decision_hash",
+        "execution", "issued_at", "expires_at", "approver_ids", "evidence_refs",
+    }
+    missing = required - set(value)
+    if missing:
+        raise MalformedResponse(
+            "Governance authorization missing required field(s)", {"missing": sorted(missing)}
+        )
+    if value["schema_version"] != "gov.authorization.v1":
+        raise MalformedResponse(
+            "Governance authorization schema version is unknown",
+            {"schema_version": value.get("schema_version")},
+        )
+    if value["decision"] not in AUTHORIZATION_DECISIONS:
+        raise MalformedResponse(
+            "Governance authorization decision vocabulary is invalid",
+            {"decision": value.get("decision")},
+        )
+    if not isinstance(value["reason_code"], str) or not value["reason_code"].strip():
+        raise MalformedResponse("Governance authorization reason_code must be a non-empty string", {})
+    if value["execution"] != "NOT_CLAIMED_BY_GOVERNANCE":
+        raise UnsafeCapability(
+            "Governance authorization claims execution", {"execution": value.get("execution")}
+        )
+    _require_sha256(value["decision_hash"], "Governance authorization decision_hash")
+    if value["decision"] == "allow":
+        # Only an allow needs a durable receipt: a denial that could not be
+        # persisted is already refused on the Governance side.
+        _require_sha256(value["canonical_facts_hash"], "Governance authorization canonical_facts_hash")
+        if not isinstance(value.get("decision_receipt_hash"), str) or not value["decision_receipt_hash"].strip():
+            raise MalformedResponse("Governance allow carries no decision receipt hash", {})
+    if not isinstance(value["approver_ids"], list) or not all(isinstance(a, str) for a in value["approver_ids"]):
+        raise MalformedResponse("Governance authorization approver_ids must be a list of strings", {})
+    return dict(value)
+
+
 def validate_axon_identity(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Endpoint-specific validation of the promoted AXON gateway GET /health.
 

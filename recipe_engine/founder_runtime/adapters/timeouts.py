@@ -91,6 +91,10 @@ _POLICIES = (
     _p("governance", "default_policy", 4_000),
     _p("governance", "decide_deferred", 4_000),
     _p("governance", "decide", 4_000),  # fixture compatibility; live decision remains gated
+    # T31B: the authority grant on /v2/authorize. A bounded, declared timeout is
+    # part of failing closed — an authority organ that never answers must become
+    # a denial at a known moment, not an open-ended wait.
+    _p("governance", "authorize", 4_000),
     _p("axon_readonly", "identity", 5_000),
     _p("axon_readonly", "tools_census", 5_000),
     _p(
