@@ -257,7 +257,8 @@ class ModeDisciplineTests(unittest.TestCase):
     def test_live_mode_requires_an_executor(self):
         with self.assertRaises(LongHorizonError):
             OrganReader("live", organs={"mother": object(), "github": object(),
-                                        "vault": object(), "qdrant": object()})
+                                        "vault": object(), "qdrant": object(),
+                                        "governance": object()})
 
     def test_incomplete_live_organ_set_is_refused(self):
         with self.assertRaises(LongHorizonError):

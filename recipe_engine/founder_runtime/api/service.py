@@ -37,6 +37,7 @@ from recipe_engine.founder_runtime.errors import (
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
 from recipe_engine.founder_runtime.ids import hash_payload, new_uuid, stable_id
+from recipe_engine.founder_runtime.runtime.approvals import gated_action_for
 from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
 from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
 
@@ -415,11 +416,13 @@ class MissionService:
         return {"envelope": self._envelope(mission), "proposed_plan": plan, "plan_id": plan_id}
 
     def _record_decision(self, mission_id: str, *, decision: ApprovalDecision, reason: str,
-                         idempotency_key: str, expected_version: int | None) -> dict[str, Any]:
+                         idempotency_key: str, expected_version: int | None,
+                         gate: bool = False) -> dict[str, Any]:
         with self._lock:
             self._require_expected_version(expected_version)
             mission = self._get(mission_id)
-            request_hash = hash_payload({"decision": decision.value, "reason": reason, "mission_id": mission_id})
+            request_hash = hash_payload({"decision": decision.value, "reason": reason,
+                                         "mission_id": mission_id, "gate": gate})
             # Exact replay returns the stored receipt even after the state advanced.
             cached = self._idem_lookup(idempotency_key, request_hash)
             if cached is not None:
@@ -434,14 +437,24 @@ class MissionService:
             # atomic in-lock check — no stacked approvals, no last-approval-wins.
             # Checked before the awaiting-approval gate so a later conflicting
             # decision gets the precise DECISION_CONFLICT, not a state error.
-            scope = mission.plan_id or mission_id
+            # A gate decision is bound to the transition the mission kernel will
+            # actually consume it for, using the kernel's own vocabulary, so the
+            # approval this records satisfies assert_approval_usable exactly.
+            # A plan decision keeps its plan-scoped identity.
+            if gate:
+                requested_action, scope = gated_action_for(
+                    MissionState.AWAITING_APPROVAL, MissionState.QUEUED,
+                )
+            else:
+                requested_action = f"plan_decision:{decision.value}"
+                scope = mission.plan_id or mission_id
             for existing in self.runtime.store.list_approvals(mission_id):
                 if existing.decision not in (ApprovalDecision.ALLOW, ApprovalDecision.DENY):
                     continue
                 if existing.scope != scope:
                     continue
                 if (existing.decision == decision
-                        and existing.exact_requested_action == f"plan_decision:{decision.value}"):
+                        and existing.exact_requested_action == requested_action):
                     # Identical semantic replay: return the existing terminal decision.
                     body = self._envelope(self._get(mission_id), receipt_id=existing.approval_id,
                                           evidence_refs=[existing.approval_id])
@@ -465,8 +478,8 @@ class MissionService:
                 approval_id=new_uuid("appr"),
                 mission_id=mission_id,
                 action_class=classified.authority_class.value if classified else "A0",
-                exact_requested_action=f"plan_decision:{decision.value}",
-                scope=mission.plan_id or mission_id,
+                exact_requested_action=requested_action,
+                scope=scope,
                 requested_by="founder",
                 decided_by="jeramie",
                 decision=decision,
@@ -481,7 +494,13 @@ class MissionService:
             # Approval changes authority state only. An allow parks the plan in
             # APPROVED_NO_EXECUTION (a precise non-executing state); it NEVER
             # queues/executes it (no executor in V1).
-            if decision == ApprovalDecision.ALLOW:
+            # A plan approval parks in APPROVED_NO_EXECUTION: this surface has no
+            # executor and will not advance the mission. A GATE approval must not
+            # advance it either, but for the opposite reason — the mission kernel
+            # is the one that consumes it, and it can only do that from
+            # AWAITING_APPROVAL. Advancing here would strand the approval in a
+            # state the kernel cannot gate from.
+            if decision == ApprovalDecision.ALLOW and not gate:
                 self.runtime.transition(mission_id, MissionState.APPROVED_NO_EXECUTION,
                                         reason="plan_approved_no_execution_authority")
             body = self._envelope(self._get(mission_id), receipt_id=recorded.approval_id,
@@ -504,6 +523,28 @@ class MissionService:
             raise ApiError(422, "REASON_REQUIRED", "rejection requires a reason", {})
         return self._record_decision(mission_id, decision=ApprovalDecision.DENY, reason=reason,
                                      idempotency_key=idempotency_key, expected_version=expected_version)
+
+    def approve_mission_gate(self, mission_id: str, *, reason: str, idempotency_key: str,
+                             expected_version: int | None = None) -> dict[str, Any]:
+        """Record the founder's ALLOW for the mission's authority gate.
+
+        This is the external origin the live mission gate requires. It records
+        authority state and nothing else: no execution, no state advance, no
+        transitive authority. The mission process — separately, on its own
+        resume — consults Governance and consumes this exactly once.
+        """
+        return self._record_decision(mission_id, decision=ApprovalDecision.ALLOW, reason=reason,
+                                     idempotency_key=idempotency_key,
+                                     expected_version=expected_version, gate=True)
+
+    def reject_mission_gate(self, mission_id: str, *, reason: str, idempotency_key: str,
+                            expected_version: int | None = None) -> dict[str, Any]:
+        """Record the founder's DENY for the mission's authority gate."""
+        if not reason.strip():
+            raise ApiError(422, "REASON_REQUIRED", "rejection requires a reason", {})
+        return self._record_decision(mission_id, decision=ApprovalDecision.DENY, reason=reason,
+                                     idempotency_key=idempotency_key,
+                                     expected_version=expected_version, gate=True)
 
     def _lifecycle(self, mission_id: str, *, action: str, idempotency_key: str,
                    expected_version: int | None) -> dict[str, Any]:
