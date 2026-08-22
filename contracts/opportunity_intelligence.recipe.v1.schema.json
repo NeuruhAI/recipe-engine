@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.opportunity-intelligence.recipe.v1",
+  "title": "Explainable Opportunity Recipe v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "recipe_id",
+    "version",
+    "score_version",
+    "config_digest",
+    "score",
+    "asset_aliases",
+    "signal_rules",
+    "confidence",
+    "readiness",
+    "action_rules",
+    "fact_sources",
+    "priority_bands"
+  ],
+  "properties": {
+    "schema_version": {"const": "neuruh.opportunity-intelligence.recipe.v1"},
+    "recipe_id": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "score_version": {"const": "landos.opportunity-score.v1"},
+    "config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "score": {
+      "type": "object",
+      "required": ["base", "minimum", "maximum"],
+      "properties": {
+        "base": {"type": "integer"},
+        "minimum": {"type": "integer"},
+        "maximum": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
+    "asset_aliases": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": ["waterfront", "acreage", "vacant_land", "residential", "commercial", "unknown"]
+      }
+    },
+    "signal_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "signal_type",
+          "label",
+          "category",
+          "points_if_present",
+          "points_if_absent",
+          "confidence_weight",
+          "material",
+          "next_sources"
+        ],
+        "properties": {
+          "signal_type": {"type": "string", "minLength": 1},
+          "label": {"type": "string", "minLength": 1},
+          "category": {"type": "string", "minLength": 1},
+          "points_if_present": {"type": "integer"},
+          "points_if_absent": {"type": "integer"},
+          "confidence_weight": {"type": "integer", "minimum": 1},
+          "material": {"type": "boolean"},
+          "next_sources": {"type": "array", "items": {"$ref": "#/$defs/source"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "required": [
+        "formula",
+        "credits",
+        "conflicted_credit",
+        "readiness_fact_weight"
+      ],
+      "properties": {
+        "formula": {"type": "string", "minLength": 1},
+        "credits": {
+          "type": "object",
+          "required": ["HIGH", "MEDIUM", "LOW", "UNKNOWN"],
+          "properties": {
+            "HIGH": {"type": "number", "minimum": 0, "maximum": 1},
+            "MEDIUM": {"type": "number", "minimum": 0, "maximum": 1},
+            "LOW": {"type": "number", "minimum": 0, "maximum": 1},
+            "UNKNOWN": {"type": "number", "minimum": 0, "maximum": 1}
+          },
+          "additionalProperties": false
+        },
+        "conflicted_credit": {"type": "number", "minimum": 0, "maximum": 1},
+        "readiness_fact_weight": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "readiness": {"type": "object"},
+    "action_rules": {"type": "array", "minItems": 1},
+    "fact_sources": {"type": "object"},
+    "priority_bands": {"type": "array", "minItems": 1}
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["source_id", "mode", "expected_information"],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "mode": {"enum": ["AUTOMATIC", "MANUAL"]},
+        "expected_information": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

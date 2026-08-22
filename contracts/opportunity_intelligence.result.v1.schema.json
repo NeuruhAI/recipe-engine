@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.opportunity-intelligence.result.v1",
+  "title": "LandOS Explainable Opportunity Result v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "subject_id",
+    "recipe",
+    "opportunity_genome",
+    "caller_top_level_extensions",
+    "genome_digest",
+    "asset_classification",
+    "stacked_signals",
+    "property_population",
+    "opportunity_score",
+    "confidence_score",
+    "readiness",
+    "research_results",
+    "next_best_source",
+    "next_best_action",
+    "priority",
+    "routing",
+    "explanation",
+    "safety",
+    "receipt"
+  ],
+  "properties": {
+    "schema_version": {"const": "neuruh.opportunity-intelligence.result.v1"},
+    "subject_id": {"type": "string", "minLength": 1},
+    "genome_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "caller_top_level_extensions": {"type": "object"},
+    "property_population": {
+      "$ref": "opportunity_intelligence.property_population.v1.schema.json"
+    },
+    "opportunity_score": {
+      "type": "object",
+      "required": ["score_version", "formula", "score", "components"]
+    },
+    "confidence_score": {
+      "type": "object",
+      "required": ["score", "formula", "components"]
+    },
+    "receipt": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "input_digest",
+        "recipe_digest",
+        "genome_digest",
+        "result_digest",
+        "receipt_sha256"
+      ],
+      "properties": {
+        "schema_version": {"const": "neuruh.opportunity-intelligence.receipt.v1"},
+        "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "additionalProperties": true
+}

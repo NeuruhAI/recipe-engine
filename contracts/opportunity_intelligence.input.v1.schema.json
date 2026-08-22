@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.opportunity-intelligence.input.v1",
+  "title": "Recipe Engine to LandOS Opportunity Input v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "as_of",
+    "recipe",
+    "subject",
+    "asset",
+    "signals",
+    "property_population",
+    "readiness",
+    "research_attempts",
+    "lineage"
+  ],
+  "properties": {
+    "schema_version": {"const": "neuruh.opportunity-intelligence.input.v1"},
+    "as_of": {"type": "string", "minLength": 1},
+    "recipe": {"$ref": "opportunity_intelligence.recipe.v1.schema.json"},
+    "subject": {
+      "type": "object",
+      "required": ["subject_id"],
+      "properties": {"subject_id": {"type": "string", "minLength": 1}},
+      "additionalProperties": true
+    },
+    "asset": {"type": "object"},
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal_id", "signal_type", "state", "confidence", "evidence_refs", "source_families"],
+        "properties": {
+          "signal_id": {"type": "string", "minLength": 1},
+          "signal_type": {"type": "string", "minLength": 1},
+          "state": {"enum": ["PRESENT", "ABSENT", "UNKNOWN", "CONFLICTED"]},
+          "confidence": {"enum": ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]},
+          "evidence_refs": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+          },
+          "source_families": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "property_population": {
+      "$ref": "opportunity_intelligence.property_population.v1.schema.json"
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": {"enum": ["YES", "NO", "UNKNOWN"]}
+    },
+    "research_attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "result_state"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "result_state": {
+            "enum": [
+              "FOUND",
+              "PARTIAL",
+              "NO_MATCH",
+              "AMBIGUOUS",
+              "INCONCLUSIVE",
+              "OFFICIAL_COPY_REQUIRED",
+              "OPERATOR_REQUIRED",
+              "BLOCKED",
+              "NOT_APPLICABLE",
+              "DEFERRED",
+              "OFFICIAL_ESTATE_CASE_FOUND",
+              "PUBLIC_INDEX_NO_MATCH",
+              "AMBIGUOUS_MATCH",
+              "SEARCH_INCONCLUSIVE",
+              "HUMAN_VERIFICATION_REQUIRED"
+            ]
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "required": [
+        "evidence_refs",
+        "contact_evidence_refs",
+        "source_families",
+        "relationship_node_refs",
+        "relationship_edge_refs",
+        "quarantined_identity_refs"
+      ],
+      "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    "resolution_context": {"type": "object"},
+    "extensions": {"type": "object"}
+  },
+  "additionalProperties": true
+}

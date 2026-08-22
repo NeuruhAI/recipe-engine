@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.opportunity-intelligence.property-population.v1",
+  "title": "Opportunity Signal Observations and Deduped Property Population v1",
+  "description": "Keeps raw SIGNAL observation cardinality distinct from resolved, deduped PROPERTY cardinality.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "scope",
+    "property_identity",
+    "signal_observation_count",
+    "property_count",
+    "unresolved_signal_count",
+    "signal_amplification",
+    "identity_kinds",
+    "dedupe_provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "neuruh.opportunity-intelligence.property-population.v1"
+    },
+    "scope": {"const": "SUBJECT_SIGNAL_SET"},
+    "property_identity": {
+      "type": "object",
+      "required": ["kind", "key", "county_fips", "basis_value"],
+      "properties": {
+        "kind": {"enum": ["parcel", "address", "unresolved"]},
+        "key": {"type": "string", "minLength": 1},
+        "county_fips": {"type": "string", "minLength": 1},
+        "basis_value": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "signal_observation_count": {"type": "integer", "minimum": 0},
+    "property_count": {"type": "integer", "minimum": 0, "maximum": 1},
+    "unresolved_signal_count": {"type": "integer", "minimum": 0},
+    "signal_amplification": {"type": "number", "minimum": 0},
+    "identity_kinds": {
+      "type": "object",
+      "properties": {
+        "parcel": {"type": "integer", "minimum": 0},
+        "address": {"type": "integer", "minimum": 0},
+        "unresolved": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "dedupe_provenance": {
+      "type": "object",
+      "required": ["identity_method", "producer_contract"],
+      "properties": {
+        "identity_method": {"type": "string", "minLength": 1},
+        "producer_contract": {"type": "string", "minLength": 1},
+        "run_id": {"type": "string", "minLength": 1},
+        "factory_version": {"type": "string", "minLength": 1},
+        "producer_commit": {"type": "string", "minLength": 1},
+        "source_rollup_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_rollup": {
+          "type": "object",
+          "required": [
+            "landed_signal_count",
+            "property_count",
+            "unresolved_signal_count",
+            "signal_amplification",
+            "identity_kinds",
+            "multiplicity_histogram"
+          ],
+          "properties": {
+            "landed_signal_count": {"type": "integer", "minimum": 0},
+            "property_count": {"type": "integer", "minimum": 0},
+            "unresolved_signal_count": {"type": "integer", "minimum": 0},
+            "signal_amplification": {"type": "number", "minimum": 0},
+            "identity_kinds": {
+              "type": "object",
+              "properties": {
+                "parcel": {"type": "integer", "minimum": 0},
+                "address": {"type": "integer", "minimum": 0},
+                "unresolved": {"type": "integer", "minimum": 0}
+              },
+              "additionalProperties": false
+            },
+            "multiplicity_histogram": {
+              "type": "object",
+              "patternProperties": {
+                "^[1-9][0-9]*$": {"type": "integer", "minimum": 0}
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "producer_contract": {"const": "source_factory.run_receipt.v1"}
+            }
+          },
+          "then": {
+            "required": [
+              "run_id",
+              "factory_version",
+              "producer_commit",
+              "source_rollup_sha256",
+              "source_rollup"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

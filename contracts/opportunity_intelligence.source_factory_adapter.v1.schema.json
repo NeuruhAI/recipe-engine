@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.opportunity-intelligence.source-factory-adapter.v1",
+  "title": "Source Factory Run to Per-Property Opportunity Inputs v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source_run_receipt",
+    "raw_observation_order",
+    "opportunity_inputs",
+    "unresolved_observations",
+    "adapter_receipt"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "neuruh.opportunity-intelligence.source-factory-adapter.v1"
+    },
+    "source_run_receipt": {
+      "type": "object",
+      "required": ["schema_version", "run_id", "estate"],
+      "properties": {
+        "schema_version": {"const": "source_factory.run_receipt.v1"},
+        "run_id": {"type": "string", "minLength": 1},
+        "estate": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "raw_observation_order": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "opportunity_inputs": {
+      "type": "array",
+      "items": {"$ref": "opportunity_intelligence.input.v1.schema.json"}
+    },
+    "unresolved_observations": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "adapter_receipt": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "source_contract",
+        "source_run_id",
+        "source_run_receipt_sha256",
+        "source_rollup_sha256",
+        "ordered_raw_observations_sha256",
+        "opportunity_inputs_sha256",
+        "signal_observation_count",
+        "property_count",
+        "unresolved_signal_count",
+        "adapter_receipt_sha256"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

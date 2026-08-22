@@ -83,3 +83,33 @@ python -m recipe_engine.founder_runtime.cli run --fixture
 ```
 
 See `docs/FOUNDER_RUNTIME_ARCHITECTURE.md`.
+
+## Opportunity intelligence contract
+
+Recipe Engine owns the versioned, portable policy sent to LandOS:
+
+- recipe: `neuruh.opportunity-intelligence.recipe.v1`
+- input: `neuruh.opportunity-intelligence.input.v1`
+- signal/property population: `neuruh.opportunity-intelligence.property-population.v1`
+- LandOS result: `neuruh.opportunity-intelligence.result.v1`
+- canonical recipe: `land_acquisition_explainable@1.0.0`
+- score: `landos.opportunity-score.v1`
+
+The recipe contains only declared rules and integer deltas. LandOS returns the
+positive, negative, unknown and conflicted factors, plus independent confidence,
+authority, contact, deal and offer readiness. See
+`recipe_engine/opportunity_intelligence/` and the JSON Schemas in `contracts/`.
+The population contract separately names raw `signal_observation_count` and
+deduped `property_count`. Its source-factory compatibility court preserves the
+accepted `source_factory.run_receipt.v1` 14,233-signal / 6,052-property rollup
+and one 23-observation Wake property without scoring the repeated rows 23 times.
+
+Run the cross-repo court without writing a log or manifest:
+
+```bash
+python scripts/verify_opportunity_intelligence.py --landos-root /path/to/landos-engine
+```
+
+The named Willow court is explicitly a cardinality/losslessness fixture, not
+the protected real-case payload. The actual 120 Willow replay remains owned by
+DeedSonar's T50 regression tests.
