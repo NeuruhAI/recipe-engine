@@ -722,6 +722,183 @@ def validate_input(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return payload
 
 
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+_RESULT_REQUIRED = (
+    "schema_version",
+    "subject_id",
+    "recipe",
+    "opportunity_genome",
+    "caller_top_level_extensions",
+    "genome_digest",
+    "asset_classification",
+    "stacked_signals",
+    "property_population",
+    "opportunity_score",
+    "confidence_score",
+    "readiness",
+    "research_results",
+    "next_best_source",
+    "next_best_action",
+    "priority",
+    "routing",
+    "explanation",
+    "safety",
+    "receipt",
+)
+
+
+def _sha256(value: Any, path: str) -> str:
+    text = _nonempty(value, path)
+    if not _SHA256.fullmatch(text):
+        raise OpportunityContractError(f"{path} must be a 64-char lowercase hex digest")
+    return text
+
+
+def validate_result(result: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Fail closed when a LandOS evaluate payload is not the owned result contract."""
+    if not isinstance(result, Mapping):
+        raise OpportunityContractError("result must be an object")
+    if result.get("schema_version") != RESULT_CONTRACT_VERSION:
+        raise OpportunityContractError(
+            f"result.schema_version must be {RESULT_CONTRACT_VERSION}"
+        )
+    for field in _RESULT_REQUIRED:
+        if field not in result:
+            raise OpportunityContractError(f"result.{field} is required")
+
+    _nonempty(result.get("subject_id"), "result.subject_id")
+    _sha256(result.get("genome_digest"), "result.genome_digest")
+    if not isinstance(result.get("caller_top_level_extensions"), Mapping):
+        raise OpportunityContractError(
+            "result.caller_top_level_extensions must be an object"
+        )
+    if not isinstance(result.get("opportunity_genome"), Mapping):
+        raise OpportunityContractError("result.opportunity_genome must be an object")
+    if not isinstance(result.get("asset_classification"), Mapping):
+        raise OpportunityContractError("result.asset_classification must be an object")
+    if not isinstance(result.get("property_population"), Mapping):
+        raise OpportunityContractError("result.property_population must be an object")
+    if not isinstance(result.get("readiness"), Mapping):
+        raise OpportunityContractError("result.readiness must be an object")
+    if not isinstance(result.get("research_results"), Mapping):
+        raise OpportunityContractError("result.research_results must be an object")
+    if not isinstance(result.get("next_best_source"), Mapping):
+        raise OpportunityContractError("result.next_best_source must be an object")
+    if not isinstance(result.get("next_best_action"), Mapping):
+        raise OpportunityContractError("result.next_best_action must be an object")
+    if not isinstance(result.get("priority"), Mapping):
+        raise OpportunityContractError("result.priority must be an object")
+    if not isinstance(result.get("routing"), Mapping):
+        raise OpportunityContractError("result.routing must be an object")
+    if not isinstance(result.get("safety"), Mapping):
+        raise OpportunityContractError("result.safety must be an object")
+
+    recipe = result.get("recipe")
+    if not isinstance(recipe, Mapping):
+        raise OpportunityContractError("result.recipe must be an object")
+    _nonempty(recipe.get("recipe_id"), "result.recipe.recipe_id")
+    _nonempty(recipe.get("version"), "result.recipe.version")
+    _sha256(recipe.get("config_digest"), "result.recipe.config_digest")
+    _nonempty(recipe.get("score_version"), "result.recipe.score_version")
+    if recipe.get("score_version") != SCORE_VERSION:
+        raise OpportunityContractError(
+            f"result.recipe.score_version must be {SCORE_VERSION}"
+        )
+
+    stacked = result.get("stacked_signals")
+    if not isinstance(stacked, Mapping):
+        raise OpportunityContractError("result.stacked_signals must be an object")
+    _nonnegative_int(
+        stacked.get("observation_count"), "result.stacked_signals.observation_count"
+    )
+    _list(stacked.get("raw_observations"), "result.stacked_signals.raw_observations")
+    factors = _list(
+        stacked.get("normalized_factors"), "result.stacked_signals.normalized_factors"
+    )
+    _list(
+        stacked.get("unrecognized_observations"),
+        "result.stacked_signals.unrecognized_observations",
+    )
+    for index, factor in enumerate(factors):
+        path = f"result.stacked_signals.normalized_factors[{index}]"
+        if not isinstance(factor, Mapping):
+            raise OpportunityContractError(f"{path} must be an object")
+        _nonempty(factor.get("factor_id"), f"{path}.factor_id")
+        state = factor.get("state")
+        if state not in SIGNAL_STATES:
+            raise OpportunityContractError(f"{path}.state is not recognized")
+        if not isinstance(factor.get("delta"), int) or isinstance(factor.get("delta"), bool):
+            raise OpportunityContractError(f"{path}.delta must be an integer")
+
+    score = result.get("opportunity_score")
+    if not isinstance(score, Mapping):
+        raise OpportunityContractError("result.opportunity_score must be an object")
+    _nonempty(score.get("score_version"), "result.opportunity_score.score_version")
+    if score.get("score_version") != SCORE_VERSION:
+        raise OpportunityContractError(
+            f"result.opportunity_score.score_version must be {SCORE_VERSION}"
+        )
+    _nonempty(score.get("formula"), "result.opportunity_score.formula")
+    if not isinstance(score.get("score"), int) or isinstance(score.get("score"), bool):
+        raise OpportunityContractError("result.opportunity_score.score must be an integer")
+    components = _list(score.get("components"), "result.opportunity_score.components")
+    for index, component in enumerate(components):
+        path = f"result.opportunity_score.components[{index}]"
+        if not isinstance(component, Mapping):
+            raise OpportunityContractError(f"{path} must be an object")
+        _nonempty(component.get("factor_id"), f"{path}.factor_id")
+        if component.get("state") not in SIGNAL_STATES:
+            raise OpportunityContractError(f"{path}.state is not recognized")
+        if not isinstance(component.get("delta"), int) or isinstance(
+            component.get("delta"), bool
+        ):
+            raise OpportunityContractError(f"{path}.delta must be an integer")
+
+    confidence = result.get("confidence_score")
+    if not isinstance(confidence, Mapping):
+        raise OpportunityContractError("result.confidence_score must be an object")
+    if not isinstance(confidence.get("score"), int) or isinstance(
+        confidence.get("score"), bool
+    ):
+        raise OpportunityContractError("result.confidence_score.score must be an integer")
+    _nonempty(confidence.get("formula"), "result.confidence_score.formula")
+    _list(confidence.get("components"), "result.confidence_score.components")
+
+    explanation = result.get("explanation")
+    if not isinstance(explanation, Mapping):
+        raise OpportunityContractError("result.explanation must be an object")
+    _list(explanation.get("why"), "result.explanation.why")
+    _list(explanation.get("positive_factors"), "result.explanation.positive_factors")
+    _list(explanation.get("negative_factors"), "result.explanation.negative_factors")
+    _list(
+        explanation.get("unknown_material_factors"),
+        "result.explanation.unknown_material_factors",
+    )
+
+    receipt = result.get("receipt")
+    if not isinstance(receipt, Mapping):
+        raise OpportunityContractError("result.receipt must be an object")
+    if receipt.get("schema_version") != RECEIPT_CONTRACT_VERSION:
+        raise OpportunityContractError(
+            f"result.receipt.schema_version must be {RECEIPT_CONTRACT_VERSION}"
+        )
+    for field in (
+        "input_digest", "recipe_digest", "genome_digest", "result_digest",
+        "receipt_sha256",
+    ):
+        _sha256(receipt.get(field), f"result.receipt.{field}")
+    if receipt.get("recipe_digest") != recipe.get("config_digest"):
+        raise OpportunityContractError(
+            "result.receipt.recipe_digest must bind result.recipe.config_digest"
+        )
+    if receipt.get("genome_digest") != result.get("genome_digest"):
+        raise OpportunityContractError(
+            "result.receipt.genome_digest must bind result.genome_digest"
+        )
+    return result
+
+
 @dataclass(frozen=True)
 class FixtureCase:
     """A named, non-live generalization court input and its expected spine."""
