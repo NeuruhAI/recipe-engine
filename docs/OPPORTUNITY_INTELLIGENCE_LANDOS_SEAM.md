@@ -15,6 +15,7 @@ success as a result.
 | Organ | SHA | What it is |
 |-------|-----|------------|
 | recipe-engine `main` (base of this work) | `e461b2230df8f34011b880ded2122c005f6438cb` | “Add versioned opportunity intelligence contracts” |
+| recipe-engine caller (this branch) | `16b925fe8b1f732bc8a0769d25b3d43e16ae6c17` | fail-closed LandOS evaluate caller + courts |
 | landos-engine `main` (read-only, public contract) | `1779abf265814f5595e1153a531c4a0ee09a0faa` | “Add explainable opportunity intelligence evaluation” |
 
 `landos-engine` was **not checked out** in this environment. The public HTTP
