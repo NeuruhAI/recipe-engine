@@ -106,8 +106,9 @@ def test_adapter_builds_one_input_per_property_and_separates_unresolved():
     assert opportunity["signals"][0]["confidence"] == "HIGH"
     assert opportunity["signals"][1]["confidence"] == "MEDIUM"
     assert opportunity["signals"][0]["signal_type"] == "tax_delinquent"
-    assert opportunity["signals"][1]["signal_type"] == (
-        "source_factory.tax_foreclosure_case"
+    assert opportunity["signals"][1]["signal_type"] == "pre_foreclosure"
+    assert opportunity["signals"][1]["mapping"]["join_key_state"] == (
+        "AUTHORIZED_SOURCE_TYPE_MAPPING"
     )
     assert opportunity["signals"][0]["source_observation"] == rows[0]
     assert opportunity["signals"][1]["source_observation"] == rows[1]
@@ -128,6 +129,36 @@ def test_adapter_receipt_detects_mapped_input_or_raw_observation_tamper():
     adaptation = adapt(receipt, rows)
     adaptation["unresolved_observations"][0]["owner_name"] = "CHANGED"
     assert not verify_source_factory_adaptation(adaptation)
+
+
+def test_tax_sale_preserved_unscored_until_join_authority():
+    receipt, rows = source_run()
+    rows.insert(
+        2,
+        source_row(
+            "signal-sale",
+            apn="0609751927",
+            source_type="taxsale",
+            confidence=0.55,
+        ),
+    )
+    receipt["estate"]["landed_signal_count"] = 4
+    receipt["estate"]["property_count"] = 1
+    receipt["estate"]["signal_amplification"] = 4.0
+    receipt["estate"]["unresolved_signal_count"] = 1
+    receipt["estate"]["identity_kinds"] = {"parcel": 3, "unresolved": 1}
+    receipt["estate"]["multiplicity_histogram"] = {"3": 1}
+
+    adaptation = adapt(receipt, rows)
+    mapped = {
+        signal["signal_id"]: signal
+        for signal in adaptation["opportunity_inputs"][0]["signals"]
+    }
+    assert mapped["signal-sale"]["signal_type"] == "source_factory.taxsale"
+    assert mapped["signal-sale"]["mapping"]["mapped"] is False
+    assert mapped["signal-sale"]["mapping"]["join_key_state"] == (
+        "JOIN_KEY_AUTHORITY_BLOCKED"
+    )
 
 
 def test_adapter_rejects_receipt_cardinality_drift_and_bad_numeric_confidence():

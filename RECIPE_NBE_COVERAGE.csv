@@ -1,0 +1,8 @@
+recipe_id,nbe_state,question,source_id_or_family,field_needed,coverage_state,estimated_cost,estimated_latency,fallback
+published_tax_distress,IMPLEMENTED,What recorded debt remains and has any release already occurred?,gap.deed.recorded_instruments,mortgage_balance_proxy|release_recorded|lien_stack,WALLED,$0,3d_to_7d,title_curative_queue
+stalled_tax_foreclosure_heirship,IMPLEMENTED,What is the current docket stage and redemption timeline?,county_foreclosure_docket_publication,foreclosure_stage|sale_date|redemption_deadline,PARTIAL,$0,same_day_to_3d,operator docket verification
+heir_property_acquisition_research,IMPLEMENTED,Can we verify legal authority and heir linkage from the latest estate case?,estate_source,case_status|letters|authority_role,SOURCE_REQUIRED,$0,3d_to_14d,manual estate confirmation
+tax_sale_rescue,PARTIAL,Can we confirm sale schedule and redemption window from an authorized source?,tax_sale_source,tax_sale_stage|redemption_deadline,JOIN_KEY_AUTHORITY_BLOCKED,$0,unknown,urgent_tax_queue
+open_probate_property,PARTIAL,Is there an official probate case linkage for this parcel-owner pair?,gap.probate.court_index,case_number|personal_representative,WALLED,$0,3d_to_14d,operator probate research
+failed_listing_equity_tenure,CONTRACT_ONLY,Did an MLS listing expire or withdraw for this parcel?,gap.listing_history.mls,listing_status|off_market_date,WALLED,$0,unknown,listing_gap_queue
+vacant_estate_tax,CONTRACT_ONLY,Can vacancy be verified without inferring from mailing mismatch?,gap.vacancy.official,vacancy_indicator|inspection_date,MISSING,$0,unknown,estate_or_property_condition_queue
