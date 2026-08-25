@@ -83,9 +83,17 @@ def test_run_annotates_without_changing_rank_or_score():
         assert ranked[0]["recipe_version"] == v3.RECIPE_VERSION
         assert ranked[1]["independent_source_family_count"] == "1"
         assert int(ranked[0]["curative_priority_score"]) > int(ranked[1]["curative_priority_score"])
+        why_matched = json.loads(ranked[0]["why_matched_receipt"])
+        why_ranked = json.loads(ranked[0]["why_ranked_receipt"])
+        nbe = json.loads(ranked[0]["next_best_evidence_receipt"])
+        assert why_matched["recipe_id"] == ranked[0]["recipe_id"]
+        assert why_ranked["recipe_rank"] == int(ranked[0]["rank"])
+        assert nbe["schema_version"] == "oppack.next-best-evidence.v1"
 
         stored = json.loads((out / "NC_CURATIVE_RECIPE_SUMMARY.json").read_text(encoding="utf-8"))
         assert stored["scoring_version"] == v3.SCORING_VERSION
         assert stored["independent_source_family_distribution"] == {"1": 1, "3": 1}
         assert stored["heir_classifier"] == "strict_v2"
         assert summary["contact_authorized"] is False
+        assert summary["why_this_matched"] == "DETERMINISTIC_V1"
+        assert summary["why_this_ranked"] == "DETERMINISTIC_V1"

@@ -1,0 +1,11 @@
+recipe_id,required_process_clock,input_state,current_engine_state,source_refresh_vs_eval_boundary,blocker,canonical_file
+expiring_approaching_tax_thresholds,tax_delinquency_clock,PARTIAL,CONTRACT_ONLY,PRESERVED,county threshold schedules are not normalized,PROCESS_CLOCKS.yaml
+published_tax_distress,tax_delinquency_clock,IMPLEMENTED,PARTIAL,PRESERVED,daily evaluation cadence requires county-specific threshold authority,PROCESS_CLOCKS.yaml
+tax_out_of_state_equity,tax_delinquency_clock,PARTIAL,PARTIAL,PRESERVED,out-of-state + equity is currently proxy-based,PROCESS_CLOCKS.yaml
+stalled_tax_foreclosure_heirship,foreclosure_transition_clock,PARTIAL,PARTIAL,PRESERVED,transition-proof history is not consistently published,PROCESS_CLOCKS.yaml
+heir_property_acquisition_research,probate_event_clock,PARTIAL,PARTIAL,PRESERVED,probate event freshness varies by county and source rights,PROCESS_CLOCKS.yaml
+title_curative,title_resolution_clock,CONTRACT_ONLY,CONTRACT_ONLY,PRESERVED,recorder/title feeds remain WALLED or donor,PROCESS_CLOCKS.yaml
+code_tax_equity,code_enforcement_clock,CONTRACT_ONLY,CONTRACT_ONLY,PRESERVED,code source cadence is not normalized,PROCESS_CLOCKS.yaml
+failed_listing_equity_tenure,listing_lifecycle_clock,MISSING,MISSING,PRESERVED,MLS listing-history source is WALLED,PROCESS_CLOCKS.yaml
+old_mortgage_release_gap,title_resolution_clock,CONTRACT_ONLY,CONTRACT_ONLY,PRESERVED,release gap cannot be proven without recorder access,PROCESS_CLOCKS.yaml
+lien_stack_equity,title_resolution_clock,CONTRACT_ONLY,CONTRACT_ONLY,PRESERVED,lien-position and release sequencing are unverified in free sources,PROCESS_CLOCKS.yaml

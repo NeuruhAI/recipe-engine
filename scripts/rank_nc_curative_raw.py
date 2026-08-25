@@ -157,15 +157,27 @@ def tier(score: int) -> str:
     return "E"
 
 
+def _sort_numeric_key(value: Any) -> tuple[int, float]:
+    """Deterministic numeric tie-break preserving UNKNOWN != known zero."""
+    numeric = num(value)
+    if numeric is None:
+        return 1, 0.0
+    return 0, float(numeric)
+
+
 def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows:
         score, reasons = base_score(row)
         recipe_id, lane = recipe(row)
         t = triggers(row)
-        assessed = num(row.get("assessed_value")) or 0.0
-        tax_balance = num(row.get("tax_balance")) or 0.0
+        assessed = num(row.get("assessed_value"))
+        tax_balance = num(row.get("tax_balance"))
         spread = num(row.get("assessed_value_less_tax"))
+        spread_unknown, spread_value = _sort_numeric_key(row.get("assessed_value_less_tax"))
+        assessed_unknown, assessed_value = _sort_numeric_key(row.get("assessed_value"))
+        tax_unknown, tax_value = _sort_numeric_key(row.get("tax_balance"))
+        years_owned = integer(row.get("years_owned"))
         enriched = dict(row)
         enriched.update({
             "curative_priority_score": score,
@@ -175,7 +187,13 @@ def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "trigger_count": len(t),
             "trigger_classes": "|".join(t),
             "score_reasons": "|".join(reasons),
-            "potential_equity_proxy": "HIGH" if assessed >= 150000 and (integer(row.get("years_owned")) or 0) >= 20 else "MEDIUM" if assessed >= 75000 else "UNKNOWN",
+            "potential_equity_proxy": (
+                "HIGH"
+                if assessed is not None and years_owned is not None and assessed >= 150000 and years_owned >= 20
+                else "MEDIUM"
+                if assessed is not None and assessed >= 75000
+                else "UNKNOWN"
+            ),
             "verified_equity": "",
             "equity_status": row.get("equity_status") or "UNKNOWN_NEEDS_DEBT_SEARCH",
             "phone": "",
@@ -183,24 +201,37 @@ def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "phone_status": "NOT_ENRICHED",
             "next_research_action": "PULL_DEED_MORTGAGE_LIENS" if score >= 55 else "CONTINUE_PUBLIC_ENRICHMENT",
             "contact_authorized": False,
-            "_sort_spread": spread if spread is not None else -1.0,
-            "_sort_assessed": assessed,
-            "_sort_tax": tax_balance,
+            "_sort_spread_unknown": spread_unknown,
+            "_sort_spread": spread_value,
+            "_sort_assessed_unknown": assessed_unknown,
+            "_sort_assessed": assessed_value,
+            "_sort_tax_unknown": tax_unknown,
+            "_sort_tax": tax_value,
         })
         out.append(enriched)
 
     out.sort(key=lambda r: (
         -int(r["curative_priority_score"]),
         -int(r["trigger_count"]),
+        int(r["_sort_spread_unknown"]),
         -float(r["_sort_spread"]),
+        int(r["_sort_assessed_unknown"]),
         -float(r["_sort_assessed"]),
+        int(r["_sort_tax_unknown"]),
         -float(r["_sort_tax"]),
         str(r.get("county_fips") or ""),
         str(r.get("parcel_apn") or ""),
     ))
     for idx, row in enumerate(out, 1):
         row["rank"] = idx
-        for key in ("_sort_spread", "_sort_assessed", "_sort_tax"):
+        for key in (
+            "_sort_spread_unknown",
+            "_sort_spread",
+            "_sort_assessed_unknown",
+            "_sort_assessed",
+            "_sort_tax_unknown",
+            "_sort_tax",
+        ):
             row.pop(key, None)
     return out
 
