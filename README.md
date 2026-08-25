@@ -104,11 +104,13 @@ deduped `property_count`. Its source-factory compatibility court preserves the
 accepted `source_factory.run_receipt.v1` 14,233-signal / 6,052-property rollup
 and one 23-observation Wake property without scoring the repeated rows 23 times.
 
-**Seam status (do not invent PASS):** the in-repo caller
-`request_opportunity_evaluation` + `LandosOpportunityClient` is proven against
-a contract stub (skip / non-contract mock / UNKNOWN→ABSENT-0 all fail closed).
-LIVE LandOS HTTP evaluate is **UNWIRED** in the environment that landed this
-caller. Receipt: `docs/OPPORTUNITY_INTELLIGENCE_LANDOS_SEAM.md`.
+**Seam status (do not invent PASS):** `--landos-root` in-process
+`evaluate_opportunity` against landos-engine `1779abf` is **LIVE / PASSED**
+(`verification_sha256` `ab75e4df…`; receipt `docs/courts/landos-evaluate-1779abf.json`).
+LIVE HTTP `POST /v1/opportunity-intelligence/evaluate` is **UNWIRED** in this
+environment. UNKNOWN is not treated as 0. Details:
+`docs/OPPORTUNITY_INTELLIGENCE_LANDOS_SEAM.md` and
+`docs/courts/live-shape-receipt.md`.
 
 Run the cross-repo court without writing a log or manifest:
 

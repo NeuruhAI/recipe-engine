@@ -22,6 +22,7 @@ from recipe_engine.opportunity_intelligence import (
     DECISION_RECEIPT_VERSION,
     EVALUATE_PATH,
     LAND_ACQUISITION_RECIPE_V1_DIGEST,
+    LandosInProcessEvaluator,
     LandosOpportunityClient,
     OpportunityEvaluateError,
     RECEIPT_CONTRACT_VERSION,
@@ -193,6 +194,18 @@ def test_skipped_evaluate_fails_closed():
         request_opportunity_evaluation(payload, None)
     with pytest.raises(OpportunityEvaluateError, match="skipped"):
         request_opportunity_evaluation(payload, SkippedEvaluator())
+    with pytest.raises(OpportunityEvaluateError, match="missing"):
+        LandosInProcessEvaluator(None)
+
+
+def test_http_transport_failure_is_not_score_zero():
+    payload = _unknown_tax_payload()
+    client = LandosOpportunityClient(
+        base_url="http://127.0.0.1:1",
+        secret="fixture-secret",
+    )
+    with pytest.raises(OpportunityEvaluateError, match="transport failed"):
+        request_opportunity_evaluation(payload, client)
 
 
 def test_mocked_success_without_contract_fails_closed():

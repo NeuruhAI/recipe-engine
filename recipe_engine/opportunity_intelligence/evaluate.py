@@ -17,6 +17,7 @@ landos-engine ``1779abf``, is:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
@@ -101,6 +102,35 @@ class SkippedEvaluator:
         raise OpportunityEvaluateError(
             "LandOS evaluate was skipped; refusing to collapse the call to score 0"
         )
+
+
+class LandosInProcessEvaluator:
+    """Adapter around landos-engine ``evaluate_opportunity``.
+
+    Scoring stays in LandOS. This class only forwards the owned input. Do not
+    construct it with a stub that returns score 0; missing LandOS is UNWIRED.
+    """
+
+    def __init__(
+        self,
+        evaluate_opportunity: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
+        *,
+        identity: str = EVALUATOR_IDENTITY,
+    ) -> None:
+        if evaluate_opportunity is None:
+            raise OpportunityEvaluateError(
+                "LandOS evaluate_opportunity is missing; refusing to collapse to score 0"
+            )
+        self._evaluate_opportunity = evaluate_opportunity
+        self.identity = identity
+
+    def evaluate(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        result = self._evaluate_opportunity(dict(payload))
+        if not isinstance(result, Mapping):
+            raise OpportunityEvaluateError(
+                "LandOS evaluate_opportunity returned a non-object"
+            )
+        return result
 
 
 class LandosOpportunityClient:
