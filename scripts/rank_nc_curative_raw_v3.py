@@ -22,6 +22,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from recipe_engine.opportunity_intelligence import (
+    build_next_best_evidence,
+    build_why_this_matched,
+    build_why_this_ranked,
+)
 from scripts import rank_nc_curative_raw_v2 as v2
 
 SCORING_VERSION = "nc_curative_rank.v3"
@@ -60,6 +65,21 @@ def annotate(row: dict[str, Any]) -> dict[str, Any]:
     row["signal_count"] = row.get("trigger_count", "")
     row["scoring_version"] = SCORING_VERSION
     row["recipe_version"] = RECIPE_VERSION
+    row["why_matched_receipt"] = json.dumps(
+        build_why_this_matched(row),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    row["why_ranked_receipt"] = json.dumps(
+        build_why_this_ranked(row),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    row["next_best_evidence_receipt"] = json.dumps(
+        build_next_best_evidence(row),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return row
 
 
@@ -104,6 +124,9 @@ def run(input_csv: Path, output_dir: Path) -> dict[str, Any]:
         "families (tax collector publication, foreclosure docket, assessor parcel "
         "roll), not trigger labels."
     )
+    summary["why_this_matched"] = "DETERMINISTIC_V1"
+    summary["why_this_ranked"] = "DETERMINISTIC_V1"
+    summary["next_best_evidence"] = "DETERMINISTIC_V1"
     (output_dir / "NC_CURATIVE_RECIPE_SUMMARY.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8"
     )

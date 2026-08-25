@@ -53,10 +53,21 @@ from .fixtures import fixture_by_id, generalization_fixtures
 from .source_factory import (
     CONFIDENCE_THRESHOLDS,
     SOURCE_TYPE_TO_OPPORTUNITY_SIGNAL,
+    TAX_SALE_SOURCE_TYPES,
     adapt_source_factory_paths,
     adapt_source_factory_run,
     confidence_level,
     verify_source_factory_adaptation,
+)
+from .oppack_receipts import (
+    DEFAULT_RANKING_VERSION,
+    DEFAULT_RECIPE_VERSION,
+    MATCH_RECEIPT_VERSION,
+    NBE_RECEIPT_VERSION,
+    RANK_RECEIPT_VERSION,
+    build_next_best_evidence,
+    build_why_this_matched,
+    build_why_this_ranked,
 )
 
 __all__ = [
@@ -107,8 +118,17 @@ __all__ = [
     "request_opportunity_evaluation",
     "CONFIDENCE_THRESHOLDS",
     "SOURCE_TYPE_TO_OPPORTUNITY_SIGNAL",
+    "TAX_SALE_SOURCE_TYPES",
     "adapt_source_factory_paths",
     "adapt_source_factory_run",
     "confidence_level",
     "verify_source_factory_adaptation",
+    "MATCH_RECEIPT_VERSION",
+    "RANK_RECEIPT_VERSION",
+    "NBE_RECEIPT_VERSION",
+    "DEFAULT_RECIPE_VERSION",
+    "DEFAULT_RANKING_VERSION",
+    "build_why_this_matched",
+    "build_why_this_ranked",
+    "build_next_best_evidence",
 ]
