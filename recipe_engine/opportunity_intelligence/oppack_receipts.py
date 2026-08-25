@@ -82,6 +82,20 @@ def _ranking_version(row: Mapping[str, Any]) -> str:
     return version or DEFAULT_RANKING_VERSION
 
 
+def _known_decimal(value: Any) -> dict[str, Any]:
+    parsed = _as_decimal(value)
+    if parsed is None:
+        return {"state": "UNKNOWN", "value": None}
+    return {"state": "KNOWN", "value": str(parsed)}
+
+
+def _known_int(value: Any) -> dict[str, Any]:
+    parsed = _as_int(value)
+    if parsed is None:
+        return {"state": "UNKNOWN", "value": None}
+    return {"state": "KNOWN", "value": parsed}
+
+
 def _input_hash_payload(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "county_fips": row.get("county_fips"),
@@ -210,6 +224,15 @@ def build_why_this_ranked(row: Mapping[str, Any]) -> dict[str, Any]:
     equity_status = str(row.get("equity_status") or "")
     if equity_status.startswith("UNKNOWN"):
         unknown_material_factors.append("verified_equity")
+    if "assessed_value" in row and _as_decimal(row.get("assessed_value")) is None:
+        unknown_material_factors.append("assessed_value")
+    if "tax_balance" in row and _as_decimal(row.get("tax_balance")) is None:
+        unknown_material_factors.append("tax_balance")
+    if (
+        "assessed_value_less_tax" in row
+        and _as_decimal(row.get("assessed_value_less_tax")) is None
+    ):
+        unknown_material_factors.append("assessed_value_less_tax")
 
     contradictions: list[str] = []
     if not _truthy(row.get("tax_foreclosure_indicator")) and "court_action" in _split_pipe(
@@ -220,9 +243,10 @@ def build_why_this_ranked(row: Mapping[str, Any]) -> dict[str, Any]:
         )
 
     tie_break = {
-        "trigger_count": _as_int(row.get("trigger_count")) or 0,
-        "assessed_value": str(_as_decimal(row.get("assessed_value")) or "0"),
-        "tax_balance": str(_as_decimal(row.get("tax_balance")) or "0"),
+        "trigger_count": _known_int(row.get("trigger_count")),
+        "assessed_value": _known_decimal(row.get("assessed_value")),
+        "tax_balance": _known_decimal(row.get("tax_balance")),
+        "assessed_value_less_tax": _known_decimal(row.get("assessed_value_less_tax")),
         "county_fips": str(row.get("county_fips") or ""),
         "parcel_apn": str(row.get("parcel_apn") or ""),
     }

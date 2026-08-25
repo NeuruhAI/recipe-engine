@@ -30,6 +30,7 @@ def _row(**overrides):
         "years_owned": "26",
         "assessed_value": "250000",
         "tax_balance": "8000",
+        "assessed_value_less_tax": "242000",
         "tax_years": "2022",
         "trigger_count": "6",
         "score_reasons": (
@@ -75,6 +76,62 @@ def test_why_this_ranked_is_deterministic_and_parses_contributions():
     ]
     assert first["penalties"] == []
     assert "verified_equity" in first["unknown_material_factors"]
+
+
+def test_why_this_ranked_tie_break_distinguishes_known_zero_from_unknown():
+    known_zero = build_why_this_ranked(
+        _row(
+            equity_status="VERIFIED",
+            trigger_count="0",
+            assessed_value="0",
+            tax_balance="0",
+            assessed_value_less_tax="0",
+        )
+    )
+    unknown = build_why_this_ranked(
+        _row(
+            trigger_count="",
+            assessed_value="",
+            tax_balance="",
+            assessed_value_less_tax="",
+        )
+    )
+
+    assert known_zero["tie_break"]["assessed_value"] == {
+        "state": "KNOWN",
+        "value": "0",
+    }
+    assert known_zero["tie_break"]["tax_balance"] == {
+        "state": "KNOWN",
+        "value": "0",
+    }
+    assert unknown["tie_break"]["assessed_value"] == {
+        "state": "UNKNOWN",
+        "value": None,
+    }
+    assert unknown["tie_break"]["tax_balance"] == {
+        "state": "UNKNOWN",
+        "value": None,
+    }
+    assert unknown["tie_break"]["trigger_count"] == {
+        "state": "UNKNOWN",
+        "value": None,
+    }
+
+
+def test_why_this_ranked_preserves_unknown_material_factors_for_tie_break_inputs():
+    ranked = build_why_this_ranked(
+        _row(
+            trigger_count="",
+            assessed_value="",
+            tax_balance="",
+            assessed_value_less_tax="",
+        )
+    )
+    assert "verified_equity" in ranked["unknown_material_factors"]
+    assert "assessed_value" in ranked["unknown_material_factors"]
+    assert "tax_balance" in ranked["unknown_material_factors"]
+    assert "assessed_value_less_tax" in ranked["unknown_material_factors"]
 
 
 def test_next_best_evidence_for_foreclosure_recipe_is_docket_first():

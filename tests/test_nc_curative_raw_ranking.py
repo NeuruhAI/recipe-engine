@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import unittest
 
 from scripts.rank_nc_curative_raw import base_score, rank_rows, recipe
@@ -57,6 +58,114 @@ class CurativeRawRankingTests(unittest.TestCase):
         self.assertEqual(ranked[0]["parcel_apn"], "02.239.077")
         self.assertEqual(ranked[0]["verified_equity"], "")
         self.assertFalse(ranked[0]["contact_authorized"])
+
+    def test_known_zero_not_equal_unknown_for_tie_break(self):
+        known_zero = self.row(
+            parcel_apn="K0",
+            owner_name="OWNER KNOWN ZERO",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="",
+            assessed_value="0",
+            tax_balance="",
+            assessed_value_less_tax="",
+        )
+        unknown = self.row(
+            parcel_apn="KU",
+            owner_name="OWNER UNKNOWN",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="",
+            assessed_value="",
+            tax_balance="",
+            assessed_value_less_tax="",
+        )
+        ranked = rank_rows([unknown, known_zero])
+        self.assertEqual(ranked[0]["parcel_apn"], "K0")
+        self.assertEqual(ranked[1]["parcel_apn"], "KU")
+
+    def test_known_negative_zero_positive_numeric_tiebreak_semantics(self):
+        high = self.row(
+            parcel_apn="S-HIGH",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="",
+            assessed_value="0",
+            tax_balance="",
+            assessed_value_less_tax="10",
+        )
+        zero = self.row(
+            parcel_apn="S-ZERO",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="",
+            assessed_value="0",
+            tax_balance="",
+            assessed_value_less_tax="0",
+        )
+        negative = self.row(
+            parcel_apn="S-NEG",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="",
+            assessed_value="0",
+            tax_balance="",
+            assessed_value_less_tax="-5",
+        )
+        ranked = rank_rows([zero, negative, high])
+        self.assertEqual(
+            [r["parcel_apn"] for r in ranked],
+            ["S-HIGH", "S-ZERO", "S-NEG"],
+        )
+
+    def test_unknown_tiebreak_is_deterministic_across_reordered_inputs(self):
+        a = self.row(
+            parcel_apn="A-UNK",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="",
+            assessed_value="",
+            tax_balance="",
+            assessed_value_less_tax="",
+        )
+        z = self.row(
+            parcel_apn="Z-UNK",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="",
+            assessed_value="",
+            tax_balance="",
+            assessed_value_less_tax="",
+        )
+        first = [r["parcel_apn"] for r in rank_rows([z, a])]
+        second = [r["parcel_apn"] for r in rank_rows([a, z])]
+        shuffled_inputs = [a, z]
+        random.shuffle(shuffled_inputs)
+        third = [r["parcel_apn"] for r in rank_rows(shuffled_inputs)]
+        self.assertEqual(first, second)
+        self.assertEqual(second, third)
+        self.assertEqual(first, ["A-UNK", "Z-UNK"])
 
 
 if __name__ == "__main__":
