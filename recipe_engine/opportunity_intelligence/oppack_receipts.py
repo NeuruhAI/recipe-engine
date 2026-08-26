@@ -271,8 +271,16 @@ def build_why_this_ranked(row: Mapping[str, Any]) -> dict[str, Any]:
         },
         "tie_break": tie_break,
         # recipe_rank is per-recipe only. Missing/invalid stays null — never 0.
+        # v2 exists because v1 recipe_rank meant GLOBAL_RANK. Additive fields
+        # below do not change v2 recipe_rank/global_rank meaning.
         "recipe_rank": _as_int(row.get("recipe_rank")),
         "global_rank": global_rank,
+        "recipe_membership_count": _as_int(row.get("recipe_membership_count")),
+        "ranking_universe_id": str(row.get("ranking_universe_id") or "") or None,
+        "score": _as_int(row.get("score") if row.get("score") not in (None, "") else row.get("curative_priority_score")),
+        "score_name": str(row.get("score_name") or "curative_priority_score"),
+        "score_semantics": str(row.get("score_semantics") or "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY"),
+        "score_version": _ranking_version(row),
     }
 
 

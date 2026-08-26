@@ -61,10 +61,23 @@ def families_for(trigger_classes: str) -> list[str]:
 DEEDSONAR_PASSTHROUGH_FIELDS = (
     "global_rank",
     "recipe_rank",
+    "recipe_membership_count",
+    "ranking_version",
+    "ranking_universe_id",
+    "score",
+    "score_name",
+    "score_semantics",
+    "curative_priority_score",
     "why_matched_receipt",
     "why_ranked_receipt",
     "next_best_evidence_receipt",
     "score_reasons",
+    "component_contributions",
+    "unknown_material_factors",
+    "contradictions",
+    "source_families",
+    "independent_source_family_count",
+    "input_hash",
     "scoring_version",
     "recipe_version",
 )
@@ -77,21 +90,24 @@ def annotate(row: dict[str, Any]) -> dict[str, Any]:
     row["signal_count"] = row.get("trigger_count", "")
     row["scoring_version"] = SCORING_VERSION
     row["recipe_version"] = RECIPE_VERSION
-    row["why_matched_receipt"] = json.dumps(
-        build_why_this_matched(row),
+    matched = build_why_this_matched(row)
+    ranked = build_why_this_ranked(row)
+    nbe = build_next_best_evidence(row)
+    row["why_matched_receipt"] = json.dumps(matched, sort_keys=True, separators=(",", ":"))
+    row["why_ranked_receipt"] = json.dumps(ranked, sort_keys=True, separators=(",", ":"))
+    row["next_best_evidence_receipt"] = json.dumps(nbe, sort_keys=True, separators=(",", ":"))
+    row["input_hash"] = matched["input_hash"]
+    row["unknown_material_factors"] = "|".join(ranked.get("unknown_material_factors") or [])
+    row["contradictions"] = "|".join(ranked.get("contradictions") or [])
+    row["component_contributions"] = json.dumps(
+        ranked.get("component_contributions") or [],
         sort_keys=True,
         separators=(",", ":"),
     )
-    row["why_ranked_receipt"] = json.dumps(
-        build_why_this_ranked(row),
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    row["next_best_evidence_receipt"] = json.dumps(
-        build_next_best_evidence(row),
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    row["score_semantics"] = "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY"
+    row["score"] = row.get("curative_priority_score")
+    row["score_name"] = "curative_priority_score"
+    row["ranking_version"] = SCORING_VERSION
     return row
 
 

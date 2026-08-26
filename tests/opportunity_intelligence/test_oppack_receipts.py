@@ -17,6 +17,10 @@ def _row(**overrides):
         "rank": "7",
         "global_rank": "7",
         "recipe_rank": "2",
+        "recipe_membership_count": "5",
+        "ranking_universe_id": "universe-fixture",
+        "score": "63",
+        "curative_priority_score": "63",
         "county_fips": "37179",
         "parcel_apn": "02.239.077",
         "recipe_id": "stalled_tax_foreclosure_heirship",
@@ -73,6 +77,10 @@ def test_why_this_ranked_is_deterministic_and_parses_contributions():
     assert first["recipe_rank"] == 2
     assert first["global_rank"] == 7
     assert first["recipe_rank"] != first["global_rank"]
+    assert first["recipe_membership_count"] == 5
+    assert first["ranking_universe_id"] == "universe-fixture"
+    assert first["score"] == 63
+    assert first["score_semantics"] == "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY"
     assert int(row["rank"]) == first["global_rank"]
     assert first["component_contributions"] == [
         {"factor_id": "published_tax_distress", "delta": 10},

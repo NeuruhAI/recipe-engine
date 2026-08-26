@@ -241,6 +241,109 @@ class CurativeRawRankingTests(unittest.TestCase):
         self.assertIn("next_best_evidence_receipt", exported[0])
         self.assertIn("scoring_version", exported[0])
         self.assertIn("recipe_version", exported[0])
+        self.assertEqual(by_parcel["STALLED-A"]["recipe_membership_count"], 2)
+        self.assertEqual(by_parcel["PUB-A"]["recipe_membership_count"], 2)
+        self.assertEqual(by_parcel["STALLED-A"]["ranking_universe_id"], by_parcel["PUB-B"]["ranking_universe_id"])
+        self.assertEqual(by_parcel["STALLED-A"]["score_semantics"], "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY")
+        self.assertTrue(exported[0]["ranking_universe_id"])
+        self.assertEqual(exported[0]["recipe_membership_count"], 2)
+        self.assertEqual(exported[0]["score_semantics"], "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY")
+
+    def test_interleaved_global_rank_keeps_per_recipe_positions(self):
+        """GLOBAL 1A 2B 3A 4B 5A => recipe A 1,2,3 and recipe B 1,2."""
+        # Keep each row at 2 triggers so multi_trigger_3_plus does not collapse A/B.
+        # A = heir_property (no taxdelinquent). B = published_tax_distress (no 150k).
+        a1 = self.row(
+            parcel_apn="A1",
+            owner_name="HEIRS OF A1",
+            source_types="",
+            tax_foreclosure_indicator="False",
+            heir_indicator="True",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="3",
+            assessed_value="250000",
+            tax_balance="12000",
+            assessed_value_less_tax="238000",
+        )
+        b1 = self.row(
+            parcel_apn="B1",
+            owner_name="OWNER B1",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="26",
+            assessed_value="80000",
+            tax_balance="12000",
+            assessed_value_less_tax="68000",
+        )
+        a2 = self.row(
+            parcel_apn="A2",
+            owner_name="HEIRS OF A2",
+            source_types="",
+            tax_foreclosure_indicator="False",
+            heir_indicator="True",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="3",
+            assessed_value="150000",
+            tax_balance="500",
+            assessed_value_less_tax="149500",
+        )
+        b2 = self.row(
+            parcel_apn="B2",
+            owner_name="OWNER B2",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="26",
+            assessed_value="80000",
+            tax_balance="500",
+            assessed_value_less_tax="79500",
+        )
+        a3 = self.row(
+            parcel_apn="A3",
+            owner_name="HEIRS OF A3",
+            source_types="",
+            tax_foreclosure_indicator="False",
+            heir_indicator="True",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="3",
+            assessed_value="40000",
+            tax_balance="100",
+            assessed_value_less_tax="39900",
+        )
+        ranked = rank_rows([b2, a3, b1, a1, a2])
+        parcels = [row["parcel_apn"] for row in ranked]
+        recipes = [row["recipe_id"] for row in ranked]
+        self.assertEqual(parcels, ["A1", "B1", "A2", "B2", "A3"])
+        self.assertEqual(
+            recipes,
+            [
+                "heir_property_acquisition_research",
+                "published_tax_distress",
+                "heir_property_acquisition_research",
+                "published_tax_distress",
+                "heir_property_acquisition_research",
+            ],
+        )
+        self.assertEqual([row["global_rank"] for row in ranked], [1, 2, 3, 4, 5])
+        self.assertEqual([row["rank"] for row in ranked], [1, 2, 3, 4, 5])
+        self.assertEqual([row["recipe_rank"] for row in ranked], [1, 1, 2, 2, 3])
+        self.assertEqual(
+            [row["recipe_membership_count"] for row in ranked],
+            [3, 2, 3, 2, 3],
+        )
+        self.assertEqual(len({row["ranking_universe_id"] for row in ranked}), 1)
+        self.assertIn("heir_or_estate_signal:+20", ranked[0]["score_reasons"])
+        self.assertIn("published_tax_distress:+10", ranked[1]["score_reasons"])
+        self.assertTrue(all(row["verified_equity"] == "" for row in ranked))
+        self.assertTrue(all("verified_equity" not in (row["score_reasons"] or "") for row in ranked))
 
 
 if __name__ == "__main__":
