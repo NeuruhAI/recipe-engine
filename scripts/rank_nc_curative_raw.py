@@ -8,6 +8,13 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from recipe_engine.closed_loop.identity import digest
+from recipe_engine.opportunity_intelligence.oppack_receipts import (
+    DEFAULT_RANKING_VERSION,
+    DEFAULT_RECIPE_VERSION,
+    _parse_contributions,
+)
+
 
 def truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
@@ -20,6 +27,42 @@ def num(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+
+SCORE_NAME = "curative_priority_score"
+SCORE_SEMANTICS = "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY"
+
+
+def _recipe_version_of(row: dict[str, Any]) -> str:
+    version = str(row.get("recipe_version") or "").strip()
+    return version or DEFAULT_RECIPE_VERSION
+
+
+def _ranking_version_of(row: dict[str, Any]) -> str:
+    version = str(row.get("scoring_version") or row.get("ranking_version") or "").strip()
+    return version or DEFAULT_RANKING_VERSION
+
+
+def _recipe_partition_key(row: dict[str, Any]) -> tuple[str, str]:
+    return (str(row.get("recipe_id") or ""), _recipe_version_of(row))
+
+
+def _ranking_universe_id(rows: list[dict[str, Any]]) -> str:
+    payload = {
+        "ranking_version": DEFAULT_RANKING_VERSION,
+        "recipe_version": DEFAULT_RECIPE_VERSION,
+        "members": [
+            [
+                str(row.get("county_fips") or ""),
+                str(row.get("parcel_apn") or ""),
+                str(row.get("recipe_id") or ""),
+                int(row["curative_priority_score"]),
+            ]
+            for row in rows
+        ],
+    }
+    return digest(payload)
 
 
 def integer(value: Any) -> int | None:
@@ -222,9 +265,27 @@ def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         str(r.get("county_fips") or ""),
         str(r.get("parcel_apn") or ""),
     ))
+    # `rank` remains GLOBAL_RANK over the full universe. Do not rename it.
+    # recipe_rank is 1-based among recipe_id + recipe_version, same global order.
+    universe_id = _ranking_universe_id(out)
+    membership_totals: Counter[tuple[str, str]] = Counter(_recipe_partition_key(row) for row in out)
+    recipe_seen: Counter[tuple[str, str]] = Counter()
     for idx, row in enumerate(out, 1):
+        key = _recipe_partition_key(row)
+        recipe_seen[key] += 1
         row["rank"] = idx
-        for key in (
+        row["global_rank"] = idx
+        row["recipe_rank"] = recipe_seen[key]
+        row["recipe_membership_count"] = membership_totals[key]
+        row["recipe_version"] = _recipe_version_of(row)
+        row["ranking_version"] = _ranking_version_of(row)
+        row["scoring_version"] = _ranking_version_of(row)
+        row["score"] = row["curative_priority_score"]
+        row["score_name"] = SCORE_NAME
+        row["score_semantics"] = SCORE_SEMANTICS
+        row["ranking_universe_id"] = universe_id
+        row["component_contributions"] = json.dumps(_parse_contributions(str(row.get("score_reasons") or "")), separators=(",", ":"), sort_keys=True)
+        for key_name in (
             "_sort_spread_unknown",
             "_sort_spread",
             "_sort_assessed_unknown",
@@ -232,7 +293,7 @@ def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "_sort_tax_unknown",
             "_sort_tax",
         ):
-            row.pop(key, None)
+            row.pop(key_name, None)
     return out
 
 
@@ -242,7 +303,8 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fields: list[str] | None =
         path.write_text("", encoding="utf-8")
         return
     if fields is None:
-        fields = ["rank"] + [k for k in rows[0].keys() if k != "rank"]
+        leading = [k for k in ("rank", "global_rank", "recipe_rank", "recipe_membership_count") if k in rows[0]]
+        fields = leading + [k for k in rows[0].keys() if k not in leading]
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
@@ -272,8 +334,28 @@ def deedsonar_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "notes": notes,
             "source_url": r.get("source_url"),
             "curative_priority_score": r.get("curative_priority_score"),
+            "score": r.get("score", r.get("curative_priority_score")),
+            "score_name": r.get("score_name", SCORE_NAME),
+            "score_semantics": r.get("score_semantics", SCORE_SEMANTICS),
             "priority_tier": r.get("priority_tier"),
             "recipe_id": r.get("recipe_id"),
+            "global_rank": r.get("global_rank", r.get("rank")),
+            "recipe_rank": r.get("recipe_rank"),
+            "recipe_membership_count": r.get("recipe_membership_count"),
+            "ranking_version": r.get("ranking_version", r.get("scoring_version", "")),
+            "ranking_universe_id": r.get("ranking_universe_id", ""),
+            "score_reasons": r.get("score_reasons"),
+            "component_contributions": r.get("component_contributions", ""),
+            "why_matched_receipt": r.get("why_matched_receipt", ""),
+            "why_ranked_receipt": r.get("why_ranked_receipt", ""),
+            "next_best_evidence_receipt": r.get("next_best_evidence_receipt", ""),
+            "unknown_material_factors": r.get("unknown_material_factors", ""),
+            "contradictions": r.get("contradictions", ""),
+            "source_families": r.get("source_families", ""),
+            "independent_source_family_count": r.get("independent_source_family_count", ""),
+            "input_hash": r.get("input_hash", ""),
+            "scoring_version": r.get("scoring_version", ""),
+            "recipe_version": r.get("recipe_version", ""),
             "trigger_classes": r.get("trigger_classes"),
             "years_owned": r.get("years_owned"),
             "out_of_state": r.get("out_of_state"),
