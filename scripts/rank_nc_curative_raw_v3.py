@@ -58,6 +58,18 @@ def families_for(trigger_classes: str) -> list[str]:
     return list(seen)
 
 
+DEEDSONAR_PASSTHROUGH_FIELDS = (
+    "global_rank",
+    "recipe_rank",
+    "why_matched_receipt",
+    "why_ranked_receipt",
+    "next_best_evidence_receipt",
+    "score_reasons",
+    "scoring_version",
+    "recipe_version",
+)
+
+
 def annotate(row: dict[str, Any]) -> dict[str, Any]:
     families = families_for(row.get("trigger_classes"))
     row["source_families"] = "|".join(families)
@@ -86,19 +98,7 @@ def annotate(row: dict[str, Any]) -> dict[str, Any]:
 def run(input_csv: Path, output_dir: Path) -> dict[str, Any]:
     summary = v2.run(input_csv, output_dir)
 
-    deedsonar = output_dir / "DEEDSONAR_RAW_IMPORT.csv"
-    if deedsonar.exists():
-        with deedsonar.open(newline="", encoding="utf-8-sig") as fh:
-            rows = [dict(r) for r in csv.DictReader(fh)]
-        for row in rows:
-            row["scoring_version"] = SCORING_VERSION
-            row["recipe_version"] = RECIPE_VERSION
-        if rows:
-            with deedsonar.open("w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
-                writer.writeheader()
-                writer.writerows(rows)
-
+    annotated_all: list[dict[str, Any]] = []
     distribution: Counter[int] = Counter()
     for name in ("NC_CURATIVE_ALL.csv", "NC_CURATIVE_TOP_500.csv", "NC_CURATIVE_TOP_100.csv"):
         path = output_dir / name
@@ -107,9 +107,32 @@ def run(input_csv: Path, output_dir: Path) -> dict[str, Any]:
         with path.open(newline="", encoding="utf-8-sig") as fh:
             rows = [annotate(dict(r)) for r in csv.DictReader(fh)]
         if name == "NC_CURATIVE_ALL.csv":
+            annotated_all = rows
             distribution = Counter(int(r["independent_source_family_count"]) for r in rows)
         if rows:
             with path.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+
+    deedsonar = output_dir / "DEEDSONAR_RAW_IMPORT.csv"
+    if deedsonar.exists():
+        with deedsonar.open(newline="", encoding="utf-8-sig") as fh:
+            rows = [dict(r) for r in csv.DictReader(fh)]
+        source_by_key = {
+            (src.get("county_fips"), src.get("parcel_apn")): src for src in annotated_all
+        }
+        for idx, row in enumerate(rows):
+            src = source_by_key.get((row.get("county_fips"), row.get("parcel_apn")))
+            if src is None and idx < len(annotated_all):
+                src = annotated_all[idx]
+            if src is not None:
+                for field in DEEDSONAR_PASSTHROUGH_FIELDS:
+                    row[field] = src.get(field, row.get(field, ""))
+            row["scoring_version"] = SCORING_VERSION
+            row["recipe_version"] = RECIPE_VERSION
+        if rows:
+            with deedsonar.open("w", newline="", encoding="utf-8") as fh:
                 writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
                 writer.writeheader()
                 writer.writerows(rows)

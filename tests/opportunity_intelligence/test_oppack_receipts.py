@@ -15,6 +15,8 @@ from recipe_engine.opportunity_intelligence import (
 def _row(**overrides):
     row = {
         "rank": "7",
+        "global_rank": "7",
+        "recipe_rank": "2",
         "county_fips": "37179",
         "parcel_apn": "02.239.077",
         "recipe_id": "stalled_tax_foreclosure_heirship",
@@ -66,8 +68,12 @@ def test_why_this_ranked_is_deterministic_and_parses_contributions():
     second = build_why_this_ranked(row)
     assert first == second
     assert first["schema_version"] == RANK_RECEIPT_VERSION
+    assert first["schema_version"] == "oppack.why-this-ranked.v2"
     assert first["ranking_version"] == DEFAULT_RANKING_VERSION
-    assert first["recipe_rank"] == 7
+    assert first["recipe_rank"] == 2
+    assert first["global_rank"] == 7
+    assert first["recipe_rank"] != first["global_rank"]
+    assert int(row["rank"]) == first["global_rank"]
     assert first["component_contributions"] == [
         {"factor_id": "published_tax_distress", "delta": 10},
         {"factor_id": "active_tax_foreclosure", "delta": 25},
@@ -117,6 +123,27 @@ def test_why_this_ranked_tie_break_distinguishes_known_zero_from_unknown():
         "state": "UNKNOWN",
         "value": None,
     }
+
+
+def test_why_this_ranked_missing_recipe_rank_is_null_not_zero():
+    missing = build_why_this_ranked(_row(recipe_rank=""))
+    absent = dict(_row())
+    absent.pop("recipe_rank")
+    absent_receipt = build_why_this_ranked(absent)
+
+    assert missing["recipe_rank"] is None
+    assert absent_receipt["recipe_rank"] is None
+    assert missing["recipe_rank"] != 0
+    assert absent_receipt["recipe_rank"] != 0
+    assert missing["global_rank"] == 7
+    assert absent_receipt["global_rank"] == 7
+
+
+def test_why_this_ranked_does_not_treat_global_rank_as_recipe_rank():
+    ranked = build_why_this_ranked(_row(rank="7", global_rank="7", recipe_rank="2"))
+    assert ranked["recipe_rank"] == 2
+    assert ranked["global_rank"] == 7
+    assert ranked["recipe_rank"] != ranked["global_rank"]
 
 
 def test_why_this_ranked_preserves_unknown_material_factors_for_tie_break_inputs():
