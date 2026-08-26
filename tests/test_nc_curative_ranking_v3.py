@@ -29,6 +29,26 @@ def _write_input(path: Path) -> None:
             "equity_status": "UNKNOWN_NEEDS_DEBT_SEARCH",
         },
         {
+            "county": "Union",
+            "county_fips": "37179",
+            "parcel_apn": "09.100.001",
+            "owner_name": "UNKNOWN HEIRS OF JANE ROE",
+            "property_address": "50 PINE ST",
+            "owner_mailing_address": "50 PINE ST",
+            "owner_mailing_state": "NC",
+            "assessed_value": "90000",
+            "tax_balance": "1500",
+            "tax_years": "2023",
+            "years_owned": "6",
+            "out_of_state": "False",
+            "heir_indicator": "True",
+            "fragmented_ownership_indicator": "False",
+            "tax_foreclosure_indicator": "True",
+            "source_types": "taxdelinquent|tax_foreclosure_case",
+            "source_url": "https://example.test",
+            "equity_status": "UNKNOWN_NEEDS_DEBT_SEARCH",
+        },
+        {
             "county": "Mecklenburg",
             "county_fips": "37119",
             "parcel_apn": "06724316",
@@ -81,18 +101,59 @@ def test_run_annotates_without_changing_rank_or_score():
         assert ranked[0]["independent_source_family_count"] == "3"
         assert ranked[0]["scoring_version"] == v3.SCORING_VERSION
         assert ranked[0]["recipe_version"] == v3.RECIPE_VERSION
-        assert ranked[1]["independent_source_family_count"] == "1"
+        assert ranked[0]["scoring_version"] == "nc_curative_rank.v3"
+        assert int(ranked[0]["rank"]) == int(ranked[0]["global_rank"]) == 1
+        assert int(ranked[0]["recipe_rank"]) == 1
+        assert ranked[1]["parcel_apn"] == "09.100.001"
+        assert ranked[1]["recipe_id"] == ranked[0]["recipe_id"]
+        assert int(ranked[1]["global_rank"]) == 2
+        assert int(ranked[1]["recipe_rank"]) == 2
+        assert ranked[2]["independent_source_family_count"] == "1"
         assert int(ranked[0]["curative_priority_score"]) > int(ranked[1]["curative_priority_score"])
+        assert int(ranked[1]["curative_priority_score"]) > int(ranked[2]["curative_priority_score"])
+        assert ranked[2]["recipe_id"] != ranked[0]["recipe_id"]
+        assert int(ranked[2]["global_rank"]) == 3
+        assert int(ranked[2]["recipe_rank"]) == 1
+        assert int(ranked[2]["global_rank"]) != int(ranked[2]["recipe_rank"])
         why_matched = json.loads(ranked[0]["why_matched_receipt"])
         why_ranked = json.loads(ranked[0]["why_ranked_receipt"])
         nbe = json.loads(ranked[0]["next_best_evidence_receipt"])
         assert why_matched["recipe_id"] == ranked[0]["recipe_id"]
-        assert why_ranked["recipe_rank"] == int(ranked[0]["rank"])
+        assert why_ranked["schema_version"] == "oppack.why-this-ranked.v2"
+        assert why_ranked["recipe_rank"] == int(ranked[0]["recipe_rank"])
+        assert why_ranked["global_rank"] == int(ranked[0]["global_rank"])
+        assert why_ranked["global_rank"] == int(ranked[0]["rank"])
+        why_ranked_third = json.loads(ranked[2]["why_ranked_receipt"])
+        assert why_ranked_third["global_rank"] == 3
+        assert why_ranked_third["recipe_rank"] == 1
+        assert why_ranked_third["recipe_rank"] != why_ranked_third["global_rank"]
         assert nbe["schema_version"] == "oppack.next-best-evidence.v1"
+
+        with (out / "DEEDSONAR_RAW_IMPORT.csv").open(newline="", encoding="utf-8-sig") as fh:
+            imported = list(csv.DictReader(fh))
+        for field in (
+            "global_rank",
+            "recipe_rank",
+            "why_matched_receipt",
+            "why_ranked_receipt",
+            "next_best_evidence_receipt",
+            "score_reasons",
+            "scoring_version",
+            "recipe_version",
+        ):
+            assert field in imported[0]
+            assert imported[0][field] not in (None, "")
+        imported_ranked = json.loads(imported[2]["why_ranked_receipt"])
+        assert int(imported[2]["global_rank"]) == 3
+        assert int(imported[2]["recipe_rank"]) == 1
+        assert imported_ranked["global_rank"] == 3
+        assert imported_ranked["recipe_rank"] == 1
+        assert imported[2]["scoring_version"] == v3.SCORING_VERSION
+        assert imported[2]["recipe_version"] == v3.RECIPE_VERSION
 
         stored = json.loads((out / "NC_CURATIVE_RECIPE_SUMMARY.json").read_text(encoding="utf-8"))
         assert stored["scoring_version"] == v3.SCORING_VERSION
-        assert stored["independent_source_family_distribution"] == {"1": 1, "3": 1}
+        assert stored["independent_source_family_distribution"] == {"1": 1, "3": 2}
         assert stored["heir_classifier"] == "strict_v2"
         assert summary["contact_authorized"] is False
         assert summary["why_this_matched"] == "DETERMINISTIC_V1"

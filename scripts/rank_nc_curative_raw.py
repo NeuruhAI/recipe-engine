@@ -222,8 +222,16 @@ def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         str(r.get("county_fips") or ""),
         str(r.get("parcel_apn") or ""),
     ))
+    # `rank` remains GLOBAL_RANK over the full universe. `recipe_rank` is the
+    # 1-based position among rows that share the same recipe_id, in that same
+    # global order. Do not rename `rank`; emit `global_rank` as an explicit alias.
+    recipe_counts: Counter[str] = Counter()
     for idx, row in enumerate(out, 1):
         row["rank"] = idx
+        row["global_rank"] = idx
+        recipe_id = str(row.get("recipe_id") or "")
+        recipe_counts[recipe_id] += 1
+        row["recipe_rank"] = recipe_counts[recipe_id]
         for key in (
             "_sort_spread_unknown",
             "_sort_spread",
@@ -242,7 +250,8 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fields: list[str] | None =
         path.write_text("", encoding="utf-8")
         return
     if fields is None:
-        fields = ["rank"] + [k for k in rows[0].keys() if k != "rank"]
+        leading = [k for k in ("rank", "global_rank", "recipe_rank") if k in rows[0]]
+        fields = leading + [k for k in rows[0].keys() if k not in leading]
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
@@ -274,6 +283,14 @@ def deedsonar_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "curative_priority_score": r.get("curative_priority_score"),
             "priority_tier": r.get("priority_tier"),
             "recipe_id": r.get("recipe_id"),
+            "global_rank": r.get("global_rank", r.get("rank")),
+            "recipe_rank": r.get("recipe_rank"),
+            "score_reasons": r.get("score_reasons"),
+            "why_matched_receipt": r.get("why_matched_receipt", ""),
+            "why_ranked_receipt": r.get("why_ranked_receipt", ""),
+            "next_best_evidence_receipt": r.get("next_best_evidence_receipt", ""),
+            "scoring_version": r.get("scoring_version", ""),
+            "recipe_version": r.get("recipe_version", ""),
             "trigger_classes": r.get("trigger_classes"),
             "years_owned": r.get("years_owned"),
             "out_of_state": r.get("out_of_state"),

@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import unittest
 
-from scripts.rank_nc_curative_raw import base_score, rank_rows, recipe
+from scripts.rank_nc_curative_raw import base_score, deedsonar_rows, rank_rows, recipe
 
 
 class CurativeRawRankingTests(unittest.TestCase):
@@ -166,6 +166,81 @@ class CurativeRawRankingTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(second, third)
         self.assertEqual(first, ["A-UNK", "Z-UNK"])
+
+    def test_global_rank_aliases_rank_and_recipe_rank_is_per_recipe(self):
+        stalled_a = self.row(parcel_apn="STALLED-A")
+        stalled_b = self.row(
+            parcel_apn="STALLED-B",
+            assessed_value="75000",
+            tax_balance="1000",
+            assessed_value_less_tax="74000",
+            years_owned="5",
+            out_of_state="False",
+            fragmented_ownership_indicator="False",
+        )
+        published_a = self.row(
+            parcel_apn="PUB-A",
+            owner_name="DOE JOHN",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="3",
+            assessed_value="80000",
+            tax_balance="500",
+            assessed_value_less_tax="79500",
+        )
+        published_b = self.row(
+            parcel_apn="PUB-B",
+            owner_name="ROE JANE",
+            source_types="taxdelinquent",
+            tax_foreclosure_indicator="False",
+            heir_indicator="False",
+            fragmented_ownership_indicator="False",
+            out_of_state="False",
+            years_owned="2",
+            assessed_value="40000",
+            tax_balance="100",
+            assessed_value_less_tax="39900",
+        )
+        ranked = rank_rows([published_b, stalled_b, published_a, stalled_a])
+        by_parcel = {row["parcel_apn"]: row for row in ranked}
+
+        self.assertEqual(
+            [row["parcel_apn"] for row in ranked],
+            ["STALLED-A", "STALLED-B", "PUB-A", "PUB-B"],
+        )
+        for row in ranked:
+            self.assertEqual(row["rank"], row["global_rank"])
+
+        self.assertEqual(by_parcel["STALLED-A"]["recipe_id"], "stalled_tax_foreclosure_heirship")
+        self.assertEqual(by_parcel["STALLED-B"]["recipe_id"], "stalled_tax_foreclosure_heirship")
+        self.assertEqual(by_parcel["PUB-A"]["recipe_id"], "published_tax_distress")
+        self.assertEqual(by_parcel["PUB-B"]["recipe_id"], "published_tax_distress")
+
+        self.assertEqual(by_parcel["STALLED-A"]["global_rank"], 1)
+        self.assertEqual(by_parcel["STALLED-A"]["recipe_rank"], 1)
+        self.assertEqual(by_parcel["STALLED-B"]["global_rank"], 2)
+        self.assertEqual(by_parcel["STALLED-B"]["recipe_rank"], 2)
+        self.assertEqual(by_parcel["PUB-A"]["global_rank"], 3)
+        self.assertEqual(by_parcel["PUB-A"]["recipe_rank"], 1)
+        self.assertEqual(by_parcel["PUB-B"]["global_rank"], 4)
+        self.assertEqual(by_parcel["PUB-B"]["recipe_rank"], 2)
+
+        self.assertNotEqual(by_parcel["PUB-A"]["global_rank"], by_parcel["PUB-A"]["recipe_rank"])
+        self.assertNotEqual(by_parcel["PUB-B"]["global_rank"], by_parcel["PUB-B"]["recipe_rank"])
+
+        exported = deedsonar_rows(ranked)
+        self.assertEqual(exported[0]["global_rank"], 1)
+        self.assertEqual(exported[2]["recipe_rank"], 1)
+        self.assertEqual(exported[2]["global_rank"], 3)
+        self.assertIn("published_tax_distress:+10", exported[2]["score_reasons"])
+        self.assertIn("why_matched_receipt", exported[0])
+        self.assertIn("why_ranked_receipt", exported[0])
+        self.assertIn("next_best_evidence_receipt", exported[0])
+        self.assertIn("scoring_version", exported[0])
+        self.assertIn("recipe_version", exported[0])
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from recipe_engine.closed_loop.identity import digest
 
 
 MATCH_RECEIPT_VERSION = "oppack.why-this-matched.v1"
-RANK_RECEIPT_VERSION = "oppack.why-this-ranked.v1"
+RANK_RECEIPT_VERSION = "oppack.why-this-ranked.v2"
 NBE_RECEIPT_VERSION = "oppack.next-best-evidence.v1"
 DEFAULT_RECIPE_VERSION = "nc_curative_recipes.v1"
 DEFAULT_RANKING_VERSION = "nc_curative_rank.v3"
@@ -251,6 +251,11 @@ def build_why_this_ranked(row: Mapping[str, Any]) -> dict[str, Any]:
         "parcel_apn": str(row.get("parcel_apn") or ""),
     }
 
+    global_rank = _as_int(row.get("global_rank"))
+    if global_rank is None:
+        # `rank` is GLOBAL_RANK; never treat it as recipe_rank.
+        global_rank = _as_int(row.get("rank"))
+
     return {
         "schema_version": RANK_RECEIPT_VERSION,
         "recipe_id": str(row.get("recipe_id") or ""),
@@ -265,7 +270,9 @@ def build_why_this_ranked(row: Mapping[str, Any]) -> dict[str, Any]:
             "tax_years": str(row.get("tax_years") or "UNKNOWN"),
         },
         "tie_break": tie_break,
-        "recipe_rank": _as_int(row.get("rank")) or 0,
+        # recipe_rank is per-recipe only. Missing/invalid stays null — never 0.
+        "recipe_rank": _as_int(row.get("recipe_rank")),
+        "global_rank": global_rank,
     }
 
 
