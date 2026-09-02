@@ -399,7 +399,7 @@ def test_identity_denial_parks_instead_of_blocking(tmp_path):
     assert res["envelope"]["state"] == "AWAITING_APPROVAL"
     r = res["authority_resolution"]
     assert r["outcome"] == resolver.UNRESOLVED and r["reason_code"] == "SOURCE_SHA_MISMATCH"
-    assert r["detail"]["infrastructure"] is True
+    assert r["detail"]["consequence_denial"] is False, "an identity fault is not a verdict on the mission"
     assert _approvals(svc, res["envelope"]["mission_id"]) == []
 
 
@@ -494,7 +494,8 @@ def test_recorded_but_unspent_governance_approval_is_spent_on_retry_without_reas
                                     nonce="rn_" + "a" * 29, issued_at=svc.clock.now_iso())
     envelope = gov.authorize(facts, founder_approval=None, meta=None).payload
     approval = resolver.governance_decided_approval(envelope, mission_id=mid, requirement=req,
-                                                    action=GATE_ACTION, scope=GATE_SCOPE, now_iso=svc.clock.now_iso())
+                                                    action=GATE_ACTION, scope=GATE_SCOPE,
+                                                    now_iso=svc.clock.now_iso(), source_sha=SHA)
     svc.runtime.record_approval(approval)
     version = svc.get_mission(mid)["envelope"]["version"]
     out = svc.resolve_authority(mid, idempotency_key="cr-2", expected_version=version)

@@ -60,20 +60,29 @@ GOVERNANCE_DECIDER_PREFIX = "governance:"
 # Closed outcome vocabulary.
 RESOLVED_QUEUED = "resolved_queued"       # Governance allowed; approval spent; mission QUEUED
 FOUNDER_REQUIRED = "founder_required"     # Governance asks for the founder; mission stays parked
+FOUNDER_DENIED = "founder_denied"         # a human already refused THIS gate; nothing may undo it
 BLOCKED_POLICY = "blocked_policy"         # Governance denied the consequence; mission BLOCKED_POLICY
 UNRESOLVED = "unresolved"                 # authority organ unreachable / identity unqualified; parked
-OUTCOMES = (RESOLVED_QUEUED, FOUNDER_REQUIRED, BLOCKED_POLICY, UNRESOLVED)
+OUTCOMES = (RESOLVED_QUEUED, FOUNDER_REQUIRED, FOUNDER_DENIED, BLOCKED_POLICY, UNRESOLVED)
 
-# Governance denials that are about the RUNTIME or the REQUEST, not about the
-# mission's consequence. They park the mission (someone must re-qualify the
-# runtime, ratify mutation, fix the clock) rather than block it on policy —
-# blocking would require a human approval to undo a configuration problem.
-INFRASTRUCTURE_DENIALS = frozenset({
-    "IDENTITY_UNKNOWN", "SOURCE_SHA_MISMATCH", "SOURCE_SHA_SUPERSEDED",
-    "MUTATION_NOT_RATIFIED", "RISK_TIER_EXCEEDED", "ACTION_CLASS_NOT_ADMITTED",
-    "RECEIPT_CHAIN_POISONED", "RECEIPT_PERSISTENCE_FAILED",
-    "CANONICALIZATION_FAILED", "MALFORMED_FACTS", "FACTS_TIME_INVALID",
-    "FACTS_EXPIRED", "NONCE_REPLAYED",
+# Only these Governance denials are statements about the MISSION'S CONSEQUENCE.
+# Everything else Governance can deny — a malformed or unsigned grant, an
+# expired or mismatched founder approval, an unqualified runtime SHA, an
+# unratified mutation path, a poisoned receipt chain, a replayed nonce — is a
+# statement about the RUNTIME, the REQUEST or the CREDENTIAL presented with it.
+#
+# The list is an allowlist, and deliberately so. It was first written the other
+# way round, as a list of infrastructure codes to park on, and that inversion
+# had a nasty failure: one stale grant file made every mission on the runtime
+# BLOCKED_POLICY, a state whose only exit needs a consumed approval. Blocking a
+# mission on policy is a durable verdict about the work; a credential problem
+# must never be able to impersonate one. Unknown codes therefore park.
+CONSEQUENCE_DENIALS = frozenset({
+    "POLICY_BLOCKED",            # the policy engine scored this action as blocked
+    "SECRET_ROOT_DENIED",        # the target is secret-denied material
+    "PATH_ESCAPE",               # the target escapes its granted root
+    "TARGET_AMBIGUOUS",          # the target cannot be named exactly
+    "GRANT_ACTION_CLASS_DENIED", # a founder grant explicitly denies this class
 })
 
 
@@ -155,6 +164,21 @@ def consequence_for(requirement: AuthorityRequirement) -> Consequence:
 def resolver_nonce(mission_id: str, issued_at: str, attempt: str = "") -> str:
     """A fresh, url-safe, 32-char facts nonce. Governance spends it exactly once."""
     return "rn_" + hash_payload({"m": mission_id, "t": issued_at, "a": attempt})[:29]
+
+
+# The attested runtime identity is stamped into the approval this resolver
+# records, so a decision made about one source SHA can be recognised — and
+# refused — by a process running a different one. Governance binds a founder's
+# signature to the SHA the same way; this is the local half of that contract.
+SOURCE_SHA_EVIDENCE_PREFIX = "governance:source_sha:"
+
+
+def bound_source_sha(approval: Approval) -> str:
+    """The runtime SHA a Governance-decided approval was recorded under, or ""."""
+    for ref in approval.evidence_refs:
+        if isinstance(ref, str) and ref.startswith(SOURCE_SHA_EVIDENCE_PREFIX):
+            return ref[len(SOURCE_SHA_EVIDENCE_PREFIX):]
+    return ""
 
 
 def resolver_facts(
@@ -246,6 +270,7 @@ def governance_decided_approval(
     action: str,
     scope: str,
     now_iso: str,
+    source_sha: str = "",
 ) -> Approval:
     """The approval record a Governance ALLOW backs.
 
@@ -262,6 +287,8 @@ def governance_decided_approval(
         f"governance:receipt:{envelope.get('decision_receipt_hash') or ''}",
         f"governance:facts:{envelope.get('canonical_facts_hash') or ''}",
         f"governance:risk:{risk_tier}",
+        SOURCE_SHA_EVIDENCE_PREFIX + str(source_sha or ""),
+        f"governance:action_class:{requirement.authority_class.value}",
     ]
     return Approval(
         schema_version=SCHEMA_APPROVAL,
@@ -299,6 +326,7 @@ def resolve_envelope(
     scope: str,
     now_iso: str,
     external_approval_id: str | None = None,
+    source_sha: str = "",
 ) -> Resolution:
     """Map one Governance authorization envelope to a resolver outcome.
 
@@ -328,7 +356,7 @@ def resolve_envelope(
         if external_approval_id is None:
             approval = governance_decided_approval(
                 envelope, mission_id=mission_id, requirement=requirement,
-                action=action, scope=scope, now_iso=now_iso,
+                action=action, scope=scope, now_iso=now_iso, source_sha=source_sha,
             )
             if approval.expiry and approval.expiry <= now_iso:
                 return Resolution(outcome=UNRESOLVED, **{**base, "reason_code": "GOVERNANCE_DECISION_EXPIRED"})
@@ -349,12 +377,12 @@ def resolve_envelope(
             **base,
         )
     if decision == "deny":
-        outcome = UNRESOLVED if reason_code in INFRASTRUCTURE_DENIALS else BLOCKED_POLICY
+        consequence = reason_code in CONSEQUENCE_DENIALS
         return Resolution(
-            outcome=outcome,
+            outcome=BLOCKED_POLICY if consequence else UNRESOLVED,
             evidence_refs=[f"governance:authorization:{authorization_id}"],
             detail={"reasons": list(envelope.get("reasons") or []),
-                    "infrastructure": reason_code in INFRASTRUCTURE_DENIALS},
+                    "consequence_denial": consequence},
             **base,
         )
     return Resolution(outcome=UNRESOLVED, **{**base, "reason_code": "GOVERNANCE_DECISION_UNKNOWN"},
@@ -366,11 +394,29 @@ def unresolved(reason_code: str, **detail: Any) -> Resolution:
     return Resolution(outcome=UNRESOLVED, reason_code=reason_code, detail=dict(detail))
 
 
+def founder_denied(approval: Approval) -> Resolution:
+    """A human already refused this exact gate. The resolver stops here.
+
+    It does not ask Governance: an ALLOW obtained now could not undo the
+    refusal, and asking would burn a nonce and write a receipt implying the
+    question was still open. It is not the resolver's place to reopen it.
+    """
+    return Resolution(
+        outcome=FOUNDER_DENIED,
+        reason_code="FOUNDER_DENIED",
+        evidence_refs=[f"approval:{approval.approval_id}"],
+        detail={"decided_by": approval.decided_by, "approval_id": approval.approval_id,
+                "conditions": list(approval.conditions)},
+    )
+
+
 __all__ = [
-    "BLOCKED_POLICY", "CONSEQUENCE_BY_CLASS", "Consequence", "ConsequenceUnclassified",
-    "FOUNDER_REQUIRED", "GOVERNANCE_DECIDER_PREFIX", "INFRASTRUCTURE_DENIALS", "OUTCOMES",
-    "RESOLVED_QUEUED", "RESOLVER_ACTOR", "RESOLVER_LANE", "RESOLVER_STEP", "RESOLVER_VERSION",
-    "Resolution", "UNRESOLVED", "consequence_for", "governance_decided_approval",
-    "is_governance_decided", "resolve_envelope", "resolver_facts", "resolver_nonce",
-    "resolver_scope_key", "unresolved",
+    "BLOCKED_POLICY", "CONSEQUENCE_BY_CLASS", "CONSEQUENCE_DENIALS", "Consequence",
+    "ConsequenceUnclassified", "FOUNDER_DENIED", "FOUNDER_REQUIRED",
+    "GOVERNANCE_DECIDER_PREFIX", "OUTCOMES", "RESOLVED_QUEUED", "RESOLVER_ACTOR",
+    "RESOLVER_LANE", "RESOLVER_STEP", "RESOLVER_VERSION", "Resolution",
+    "SOURCE_SHA_EVIDENCE_PREFIX", "UNRESOLVED", "bound_source_sha", "consequence_for",
+    "founder_denied", "governance_decided_approval", "is_governance_decided",
+    "resolve_envelope", "resolver_facts", "resolver_nonce", "resolver_scope_key",
+    "unresolved",
 ]

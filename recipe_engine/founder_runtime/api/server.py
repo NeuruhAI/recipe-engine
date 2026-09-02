@@ -15,6 +15,7 @@ import json
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -100,13 +101,21 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
         return JSONResponse(status_code=200 if ok else 503, content=status)
 
     # ---- missions ----
+    # The two routes that can reach Governance run OFF the event loop. The
+    # mission service is synchronous and takes a process-wide lock, and the
+    # resolver's authorize call is a blocking loopback request bounded at
+    # several seconds. Run on the loop, one slow authority round trip stopped
+    # the whole ASGI worker answering anything — including /v1/health, which the
+    # workers dispatch bridge probes with a 0.25s timeout before deciding the
+    # Founder Runtime is absent. A healthy runtime must never read as absent
+    # because it was busy asking permission.
     @app.post("/v1/missions", status_code=201, dependencies=[Depends(require_auth)])
     async def create_mission(body: CreateMissionBody,
                              idempotency_key: str | None = Header(default=None)):
         key = _idem_key(idempotency_key)
-        return service.create_mission(objective=body.objective, title=body.title,
-                                      done_criteria=body.done_criteria,
-                                      idempotency_key=key)
+        return await run_in_threadpool(
+            service.create_mission, objective=body.objective, title=body.title,
+            done_criteria=body.done_criteria, idempotency_key=key)
 
     @app.get("/v1/missions", dependencies=[Depends(require_auth)])
     async def list_missions():
@@ -175,9 +184,10 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
     async def resolve_gate(mission_id: str,
                            idempotency_key: str | None = Header(default=None),
                            x_expected_version: int | None = Header(default=None)):
-        return service.resolve_authority(mission_id,
-                                         idempotency_key=_idem_key(idempotency_key),
-                                         expected_version=_expected_version(x_expected_version))
+        return await run_in_threadpool(
+            service.resolve_authority, mission_id,
+            idempotency_key=_idem_key(idempotency_key),
+            expected_version=_expected_version(x_expected_version))
 
     @app.post("/v1/missions/{mission_id}/pause", dependencies=[Depends(require_auth)])
     async def pause(mission_id: str,

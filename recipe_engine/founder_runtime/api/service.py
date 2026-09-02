@@ -51,8 +51,13 @@ from recipe_engine.founder_runtime.runtime import approval_resolver as resolver
 from recipe_engine.founder_runtime.runtime.approvals import assert_approval_usable, gated_action_for
 from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
 from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
+from recipe_engine.founder_runtime.state.transitions import is_transition_allowed
 
 API_VERSION = "fr-api-v1"
+
+# Where a paused mission came from, recorded on the pause event so resume can
+# put it back rather than guess.
+PAUSED_FROM_KEY = "paused_from"
 
 # How long the resolver waits for Governance's answer. Clamped by the adapter
 # to its policy ceiling; a timeout parks the mission (never a default-open).
@@ -76,7 +81,12 @@ _ALLOWED_NEXT = {
     "FAILED_RETRYABLE": ["get", "recover", "cancel"],
     "BLOCKED_INPUT": ["get", "cancel"],
     "BLOCKED_DEPENDENCY": ["get", "recover", "cancel"],
-    "BLOCKED_POLICY": ["get", "approve", "reject", "cancel"],
+    # No "approve": BLOCKED_POLICY -> APPROVED_NO_EXECUTION is not an edge the
+    # state machine has, so advertising it invited a call that wrote an approval
+    # and then failed. No "pause" either: the only exits from a policy block are
+    # the approval-gated ones and cancellation, and pause/resume was a way around
+    # both. Its designed exit is a consumed approval back to AWAITING_APPROVAL.
+    "BLOCKED_POLICY": ["get", "decision_packet", "plan", "reject", "cancel"],
 }
 _BLOCKED_ALWAYS = ["execute_plan", "external_action", "mutate_axon", "workers_dispatch", "production_persist"]
 
@@ -223,7 +233,15 @@ class MissionService:
 
     @staticmethod
     def _authority_state(mission: Mission, approvals: list) -> str:
-        """Explicit authority truth: PENDING until a terminal ALLOW/DENY exists."""
+        """Explicit authority truth: PENDING until a terminal ALLOW/DENY exists.
+
+        The mission's own state has the last word. A mission Governance blocked
+        on policy is not approved, whatever approval history it carries — an
+        earlier ALLOW must never make a blocked mission read as dispatchable to
+        a consumer that keys on this field.
+        """
+        if mission.current_state == MissionState.BLOCKED_POLICY:
+            return "BLOCKED"
         for a in reversed(approvals):
             if a.decision in (ApprovalDecision.ALLOW, ApprovalDecision.CONSUMED):
                 # A consumed approval was an ALLOW that the kernel spent on the
@@ -528,6 +546,19 @@ class MissionService:
                 raise ApiError(409, "NOT_AWAITING_APPROVAL",
                                "mission is not awaiting an approval decision",
                                {"state": mission.current_state.value})
+            # An ALLOW that is not a gate decision parks the plan in
+            # APPROVED_NO_EXECUTION. Prove that edge exists BEFORE anything is
+            # written: recording the approval first and discovering afterwards
+            # that the transition is impossible left a terminal ALLOW on a
+            # mission that could never consume it, and burned the
+            # single-decision latch for the scope.
+            if decision == ApprovalDecision.ALLOW and not gate:
+                if not is_transition_allowed(mission.current_state, MissionState.APPROVED_NO_EXECUTION):
+                    raise ApiError(409, "DECISION_NOT_APPLICABLE",
+                                   "a plan approval cannot be applied from this state; "
+                                   "no approval was recorded",
+                                   {"state": mission.current_state.value,
+                                    "would_require": "APPROVED_NO_EXECUTION"})
             now = self.clock.now_iso()
             classified = mission.authority_requirements[0] if mission.authority_requirements else None
             # A gate ALLOW is the founder's authority decision, so it carries the
@@ -672,21 +703,64 @@ class MissionService:
         now = self.clock.now_iso()
         approvals = self.runtime.store.list_approvals(mission_id)
 
-        # 0. A Governance-decided ALLOW this resolver recorded but never spent
-        #    (a crash between record and transition). Governance already
-        #    decided; spend it, ask nothing twice.
+        # 0. A refusal already recorded for THIS exact gate ends the question.
+        #    A DENY is not merely an unusable approval to be skipped past: it is
+        #    a decision, and the resolver is not entitled to reopen it. Asking
+        #    Governance here would be worse than pointless — for a read-only
+        #    mission Governance auto-allows, so the refusal would be overwritten
+        #    by an allow the refuser never saw.
         for existing in approvals:
-            if resolver.is_governance_decided(existing) and self._usable(
-                    existing, mission_id=mission_id, action=action, scope=scope, now=now):
-                self.runtime.transition(mission_id, MissionState.QUEUED, reason="approval_resolved_replay",
-                                        actor=resolver.RESOLVER_ACTOR, approval_id=existing.approval_id)
-                res = resolver.Resolution(outcome=resolver.RESOLVED_QUEUED, reason_code="RESOLVER_REPLAY",
-                                          authorization_id=existing.decided_by.split(":", 1)[1],
-                                          evidence_refs=list(existing.evidence_refs),
-                                          detail={"spent_approval": existing.approval_id, "replayed": True})
-                return self._resolution_dict(res, facts=None, founder_approval=None)
+            if existing.decision != ApprovalDecision.DENY:
+                continue
+            if existing.mission_id != mission_id:
+                continue
+            if existing.exact_requested_action == action and existing.scope == scope:
+                return self._resolution_dict(resolver.founder_denied(existing),
+                                             facts=None, founder_approval=None)
 
-        # 1. An externally decided ALLOW (the founder, over the gate route). It
+        # 1. Preconditions, BEFORE anything can be spent. These were once below
+        #    the replay path, which meant a leftover authorization could queue a
+        #    mission in a process that had no authority port at all and could
+        #    not have obtained one.
+        if self.governance is None:
+            return self._resolution_dict(
+                resolver.unresolved("RESOLVER_GOVERNANCE_PORT_ABSENT",
+                                    hint="run the API through the live composition root to attach Governance"),
+                facts=None, founder_approval=None)
+        if not self.attested_source_sha:
+            return self._resolution_dict(
+                resolver.unresolved("SOURCE_SHA_UNATTESTED",
+                                    hint="the composition root must attest this runtime's git source SHA"),
+                facts=None, founder_approval=None)
+
+        # 2. A Governance-decided ALLOW this resolver recorded but never spent
+        #    (a crash between record and transition). Governance already decided,
+        #    so it is not asked twice — but the record only stands if every
+        #    coordinate of that decision still holds: the exact mission, action
+        #    and scope (assert_approval_usable), the exact consequence class the
+        #    mission carries now, and the exact runtime version the decision was
+        #    made about. An authorization is not a bearer token for whatever the
+        #    process happens to be running later.
+        for existing in approvals:
+            if not resolver.is_governance_decided(existing):
+                continue
+            if not self._usable(existing, mission_id=mission_id, action=action, scope=scope, now=now):
+                continue
+            if existing.action_class != requirement.authority_class.value:
+                continue
+            if resolver.bound_source_sha(existing) != self.attested_source_sha:
+                continue
+            self.runtime.transition(mission_id, MissionState.QUEUED, reason="approval_resolved_replay",
+                                    actor=resolver.RESOLVER_ACTOR, approval_id=existing.approval_id)
+            res = resolver.Resolution(outcome=resolver.RESOLVED_QUEUED, reason_code="RESOLVER_REPLAY",
+                                      authorization_id=existing.decided_by.split(":", 1)[1],
+                                      evidence_refs=list(existing.evidence_refs),
+                                      detail={"spent_approval": existing.approval_id, "replayed": True,
+                                              "revalidated": ["mission", "action", "scope", "expiry",
+                                                              "unspent", "action_class", "source_sha"]})
+            return self._resolution_dict(res, facts=None, founder_approval=None)
+
+        # 3. An externally decided ALLOW (the founder, over the gate route). It
         #    is never spent on its own say-so: its SIGNED artifact is presented
         #    to Governance, and only Governance's allow spends it.
         external = None
@@ -698,19 +772,7 @@ class MissionService:
                 break
         founder_approval = governance_approval_from(external) if external is not None else None
 
-        # 2. Preconditions. Each is a named park, never a default-open.
-        if self.governance is None:
-            return self._resolution_dict(
-                resolver.unresolved("RESOLVER_GOVERNANCE_PORT_ABSENT",
-                                    hint="run the API through the live composition root to attach Governance"),
-                facts=None, founder_approval=founder_approval)
-        if not self.attested_source_sha:
-            return self._resolution_dict(
-                resolver.unresolved("SOURCE_SHA_UNATTESTED",
-                                    hint="the composition root must attest this runtime's git source SHA"),
-                facts=None, founder_approval=founder_approval)
-
-        # 3. The consequence, stated once, and Governance's answer to it.
+        # 4. The consequence, stated once, and Governance's answer to it.
         nonce = resolver.resolver_nonce(mission_id, now, attempt=str(len(approvals)))
         facts = resolver.resolver_facts(
             mission_id, requirement, action=action, scope=scope,
@@ -735,6 +797,7 @@ class MissionService:
         res = resolver.resolve_envelope(
             envelope, mission_id=mission_id, requirement=requirement, action=action, scope=scope,
             now_iso=now, external_approval_id=external.approval_id if external is not None else None,
+            source_sha=self.attested_source_sha,
         )
 
         # 4. Record Governance's answer on the mission's own chain, then apply
@@ -852,19 +915,32 @@ class MissionService:
             self._assert_version(mission, expected_version)
             try:
                 if action == "pause":
-                    updated = self.runtime.transition(mission_id, MissionState.PAUSED, reason="operator_pause")
+                    if mission.current_state == MissionState.BLOCKED_POLICY:
+                        # Pause/resume was a way out of a policy block that no
+                        # approval had to pay for: BLOCKED_POLICY -> PAUSED ->
+                        # AWAITING_APPROVAL is two legal edges, and only the
+                        # direct one is approval-gated. The block is not a
+                        # pausable condition; its exits are the gated ones.
+                        raise ApiError(409, "BLOCKED_POLICY_NOT_PAUSABLE",
+                                       "a policy-blocked mission cannot be paused; its exits are a "
+                                       "consumed approval back to the gate, or cancellation",
+                                       {"state": mission.current_state.value})
+                    # Remember the state being paused, so resume restores the
+                    # authority situation instead of inferring one.
+                    updated = self.runtime.transition(
+                        mission_id, MissionState.PAUSED, reason="operator_pause",
+                        payload={PAUSED_FROM_KEY: mission.current_state.value})
                 elif action == "resume":
                     mission = self._get(mission_id)
                     if mission.current_state != MissionState.PAUSED:
                         raise ApiError(409, "NOT_PAUSED", "only a paused mission can resume",
                                        {"state": mission.current_state.value})
-                    # Resume returns to the authority-correct parking state: an
-                    # approved plan resumes to APPROVED_NO_EXECUTION; a still-
-                    # pending plan resumes to AWAITING_APPROVAL.
-                    existing_approvals = self.runtime.store.list_approvals(mission_id)
-                    target = (MissionState.APPROVED_NO_EXECUTION
-                              if self._authority_state(mission, existing_approvals) == "APPROVED"
-                              else MissionState.AWAITING_APPROVAL)
+                    # Resume restores the state that was paused when the kernel
+                    # allows it. Inferring a target from authority history
+                    # stranded a mission the resolver had legitimately QUEUED:
+                    # it inferred APPROVED_NO_EXECUTION, which has no edge back
+                    # to QUEUED, so authorized work could never run again.
+                    target = self._resume_target(mission_id, mission)
                     updated = self.runtime.transition(mission_id, target, reason="operator_resume")
                 elif action == "cancel":
                     updated = self.runtime.transition(mission_id, MissionState.CANCELLED, reason="operator_cancel")
@@ -875,6 +951,29 @@ class MissionService:
             result = {"envelope": self._envelope(self._get(mission_id)), "action": action}
             self._idem_store(idempotency_key, request_hash, result)
             return result
+
+    def _resume_target(self, mission_id: str, mission: Mission) -> MissionState:
+        """Where a paused mission belongs: where it was, when that is legal."""
+        for event in reversed(self.runtime.store.list_events(mission_id)):
+            if event.next_state != MissionState.PAUSED:
+                continue
+            recorded = (event.payload or {}).get(PAUSED_FROM_KEY)
+            if not recorded:
+                break
+            try:
+                prior = MissionState(recorded)
+            except ValueError:
+                break
+            if is_transition_allowed(MissionState.PAUSED, prior):
+                return prior
+            break
+        # Missions paused before this runtime recorded the prior state, or
+        # paused out of a state the kernel will not restore, fall back to the
+        # authority-correct parking state.
+        approvals = self.runtime.store.list_approvals(mission_id)
+        return (MissionState.APPROVED_NO_EXECUTION
+                if self._authority_state(mission, approvals) == "APPROVED"
+                else MissionState.AWAITING_APPROVAL)
 
     def pause(self, mission_id: str, *, idempotency_key: str, expected_version: int | None = None):
         return self._lifecycle(mission_id, action="pause", idempotency_key=idempotency_key, expected_version=expected_version)
