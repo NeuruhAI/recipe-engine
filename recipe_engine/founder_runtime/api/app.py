@@ -18,8 +18,8 @@ DEFAULT_PORT = 19090
 HOST = "127.0.0.1"
 
 
-def make_service(db_path: str) -> MissionService:
-    return MissionService(db_path)
+def make_service(db_path: str, **service_kwargs) -> MissionService:
+    return MissionService(db_path, **service_kwargs)
 
 
 def make_auth() -> tuple[OperatorAuth, str | None]:
@@ -30,8 +30,13 @@ def make_auth() -> tuple[OperatorAuth, str | None]:
     return OperatorAuth(token), token
 
 
-def create_app(db_path: str, *, probe_live: bool = True, prober=None):
-    service = make_service(db_path)
+def create_app(db_path: str, *, probe_live: bool = True, prober=None, governance=None,
+               attested_source_sha: str = "", founder_grant=None, auto_resolve: bool = True):
+    """Build the app. ``governance`` is the resolver's authority port (an object
+    with ``authorize(...)``), supplied by a composition root outside this
+    package; without it every mission parks honestly (RESOLVER_GOVERNANCE_PORT_ABSENT)."""
+    service = make_service(db_path, governance=governance, attested_source_sha=attested_source_sha,
+                           founder_grant=founder_grant, auto_resolve=auto_resolve)
     auth, generated = make_auth()
     if generated:
         print(f"[founder-runtime-api] generated operator token (store it safely): {generated}", file=sys.stderr)
