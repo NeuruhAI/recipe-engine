@@ -54,6 +54,10 @@ from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_ST
 
 API_VERSION = "fr-api-v1"
 
+# How long the resolver waits for Governance's answer. Clamped by the adapter
+# to its policy ceiling; a timeout parks the mission (never a default-open).
+RESOLVER_AUTHORIZE_TIMEOUT_MS = 8_000
+
 # What the operator may do next, by mission state. Execution is never allowed.
 _ALLOWED_NEXT = {
     "DRAFT": ["get", "cancel"],
@@ -713,7 +717,8 @@ class MissionService:
             source_sha=self.attested_source_sha, nonce=nonce, issued_at=now,
         )
         meta = AdapterRequestMeta(correlation_id=mission_id, observed_at=now, mission_id=mission_id,
-                                  step_id=resolver.RESOLVER_STEP, authority_class=requirement.authority_class)
+                                  step_id=resolver.RESOLVER_STEP, authority_class=requirement.authority_class,
+                                  timeout_ms=RESOLVER_AUTHORIZE_TIMEOUT_MS)
         try:
             answer = self.governance.authorize(facts, founder_approval=founder_approval, meta=meta,
                                                grant=self.founder_grant)
