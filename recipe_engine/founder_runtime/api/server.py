@@ -167,6 +167,18 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
                                            idempotency_key=_idem_key(idempotency_key),
                                            expected_version=_expected_version(x_expected_version))
 
+    # The approval RESOLVER. Governance is asked whether this mission's
+    # consequence needs anyone at all; its answer is applied through the kernel.
+    # A safe mission leaves QUEUED; a consequential one stays parked with the
+    # exact founder gate it waits on. Never signs, never executes.
+    @app.post("/v1/missions/{mission_id}/gate/resolve", dependencies=[Depends(require_auth)])
+    async def resolve_gate(mission_id: str,
+                           idempotency_key: str | None = Header(default=None),
+                           x_expected_version: int | None = Header(default=None)):
+        return service.resolve_authority(mission_id,
+                                         idempotency_key=_idem_key(idempotency_key),
+                                         expected_version=_expected_version(x_expected_version))
+
     @app.post("/v1/missions/{mission_id}/pause", dependencies=[Depends(require_auth)])
     async def pause(mission_id: str,
                     idempotency_key: str | None = Header(default=None),

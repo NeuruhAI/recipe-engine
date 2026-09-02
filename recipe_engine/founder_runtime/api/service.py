@@ -32,6 +32,7 @@ from recipe_engine.founder_runtime.api.founder_signing import (
     FounderApprovalSigner,
 )
 from recipe_engine.founder_runtime.adapters.fixture_mother import FixtureMother
+from recipe_engine.founder_runtime.adapters.protocols import AdapterRequestMeta
 from recipe_engine.founder_runtime.clock import SystemClock
 from recipe_engine.founder_runtime.contracts.approval import Approval, ApprovalDecision, SCHEMA_APPROVAL
 from recipe_engine.founder_runtime.contracts.events import EventType
@@ -42,8 +43,12 @@ from recipe_engine.founder_runtime.errors import (
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
 from recipe_engine.founder_runtime.ids import hash_payload, new_uuid, stable_id
-from recipe_engine.founder_runtime.missions.long_horizon import GOV_APPROVAL_REF_PREFIX
-from recipe_engine.founder_runtime.runtime.approvals import gated_action_for
+from recipe_engine.founder_runtime.missions.long_horizon import (
+    GOV_APPROVAL_REF_PREFIX,
+    governance_approval_from,
+)
+from recipe_engine.founder_runtime.runtime import approval_resolver as resolver
+from recipe_engine.founder_runtime.runtime.approvals import assert_approval_usable, gated_action_for
 from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
 from recipe_engine.founder_runtime.state.states import MissionState, TERMINAL_STATES
 
@@ -56,7 +61,7 @@ _ALLOWED_NEXT = {
     "CONTEXT_RESOLUTION": ["get", "pause", "cancel"],
     "PLANNING": ["get", "pause", "cancel"],
     "AWAITING_DECISION": ["get", "decision_packet", "pause", "cancel"],
-    "AWAITING_APPROVAL": ["get", "decision_packet", "plan", "approve", "reject", "pause", "cancel"],
+    "AWAITING_APPROVAL": ["get", "decision_packet", "plan", "approve", "reject", "resolve", "pause", "cancel"],
     "APPROVED_NO_EXECUTION": ["get", "decision_packet", "plan", "pause", "cancel"],
     "QUEUED": ["get", "pause", "cancel"],
     "EXECUTING": ["get", "pause", "cancel"],
@@ -94,8 +99,23 @@ class ApiError(Exception):
 class MissionService:
     """Owns the runtime and idempotency ledger. Single-writer via a lock."""
 
-    def __init__(self, db_path: str | Path, *, clock=None, signer=None):
+    def __init__(self, db_path: str | Path, *, clock=None, signer=None, governance=None,
+                 attested_source_sha: str = "", founder_grant: dict[str, Any] | None = None,
+                 auto_resolve: bool = True):
         self.db_path = str(db_path)
+        # The approval resolver's authority port: something with
+        # ``authorize(facts, founder_approval=..., meta=..., grant=...)`` that
+        # reaches Governance /v2/authorize. None means this process cannot
+        # resolve anything on its own and says so; it never guesses.
+        self.governance = governance
+        # The git source SHA this runtime honestly attests to Governance. It is
+        # supplied by the composition root (never derived in the kernel) and an
+        # empty value leaves every mission parked with SOURCE_SHA_UNATTESTED.
+        self.attested_source_sha = str(attested_source_sha or "")
+        # An externally issued, founder-signed gov.grant.v1, submitted verbatim.
+        # This process can present a grant; it cannot mint one.
+        self.founder_grant = dict(founder_grant) if founder_grant else None
+        self.auto_resolve = bool(auto_resolve)
         self.clock = clock or SystemClock()
         self._lock = threading.RLock()
         self.runtime = MissionRuntime(self.db_path, clock=self.clock, adapter_mode="fixture", check_same_thread=False)
@@ -201,7 +221,9 @@ class MissionService:
     def _authority_state(mission: Mission, approvals: list) -> str:
         """Explicit authority truth: PENDING until a terminal ALLOW/DENY exists."""
         for a in reversed(approvals):
-            if a.decision == ApprovalDecision.ALLOW:
+            if a.decision in (ApprovalDecision.ALLOW, ApprovalDecision.CONSUMED):
+                # A consumed approval was an ALLOW that the kernel spent on the
+                # gated transition; the authority truth is still APPROVED.
                 return "APPROVED"
             if a.decision == ApprovalDecision.DENY:
                 return "REJECTED"
@@ -385,9 +407,21 @@ class MissionService:
                 result = {"envelope": body, "decision_packet": None, "proposed_plan": None}
             else:
                 pipe = self._run_decision_pipeline(mid)
+                # The mission is parked. Whether anyone is actually required to
+                # un-park it is Governance's question, asked right now, once,
+                # with this runtime's attested identity. A safe mission leaves
+                # here QUEUED; a consequential one leaves with the exact
+                # founder gate it is waiting on.
+                resolution = None
+                if self.auto_resolve:
+                    resolution = self._resolve_impl(
+                        mid, idempotency_key=f"resolve:{idempotency_key}",
+                        expected_version=None, internal=True,
+                    )["resolution"]
                 body = self._envelope(self._get(mid), evidence_refs=[pipe["packet"].get("packet_id") or ""])
                 result = {"envelope": body, "decision_packet": pipe["packet"],
-                          "proposed_plan": pipe["plan"], "plan_id": pipe["plan_id"]}
+                          "proposed_plan": pipe["plan"], "plan_id": pipe["plan_id"],
+                          "authority_resolution": resolution}
             self._idem_store(idempotency_key, request_hash, result)
             return result
 
@@ -574,6 +608,197 @@ class MissionService:
             risk_tier=str(published.get("risk_tier") or "R0"),
         )
         return GOV_APPROVAL_REF_PREFIX + json.dumps(artifact, sort_keys=True, separators=(",", ":"))
+
+    # ---- the approval resolver ------------------------------------------
+    # A parked mission does not need a human by default; it needs an AUTHORITY.
+    # Governance is that authority. The resolver presents the mission's
+    # consequence (classified by the trusted kernel, never by a model), lets
+    # Governance answer allow / founder_required / deny, and applies exactly
+    # that answer through the kernel's own approval-gated transition. It holds
+    # no signing key, writes no human decision, and lowers no class.
+    def resolve_authority(self, mission_id: str, *, idempotency_key: str,
+                          expected_version: int | None = None) -> dict[str, Any]:
+        return self._resolve_impl(mission_id, idempotency_key=idempotency_key,
+                                  expected_version=expected_version, internal=False)
+
+    def _resolve_impl(self, mission_id: str, *, idempotency_key: str,
+                      expected_version: int | None, internal: bool) -> dict[str, Any]:
+        with self._lock:
+            if not internal:
+                self._require_expected_version(expected_version)
+            mission = self._get(mission_id)
+            request_hash = hash_payload({"resolve": mission_id})
+            cached = self._idem_lookup(idempotency_key, request_hash)
+            if cached is not None:
+                cached["idempotent_replay"] = True
+                return cached
+            if mission.current_state in TERMINAL_STATES:
+                raise ApiError(409, "MISSION_TERMINAL", "mission is terminal", {"state": mission.current_state.value})
+            if not internal:
+                self._assert_version(mission, expected_version)
+            if mission.current_state != MissionState.AWAITING_APPROVAL:
+                raise ApiError(409, "NOT_AWAITING_APPROVAL",
+                               "only a mission parked at AWAITING_APPROVAL can be resolved",
+                               {"state": mission.current_state.value})
+            if not mission.authority_requirements:
+                raise ApiError(409, "AUTHORITY_UNCLASSIFIED",
+                               "mission carries no trusted authority classification", {})
+            requirement = mission.authority_requirements[0]
+            action, scope = gated_action_for(MissionState.AWAITING_APPROVAL, MissionState.QUEUED)
+            resolution = self._resolve_with_governance(mission_id, requirement, action=action, scope=scope)
+            body = self._envelope(self._get(mission_id), evidence_refs=list(resolution.get("evidence_refs") or []))
+            result = {
+                "envelope": body,
+                "resolution": resolution,
+                "authority_state": resolution["outcome"],
+                "executed": False,
+                "note": "authority resolved by Governance; nothing executed (no executor in this surface)",
+            }
+            self._idem_store(idempotency_key, request_hash, result)
+            return result
+
+    def _usable(self, approval: Approval, *, mission_id: str, action: str, scope: str, now: str) -> bool:
+        try:
+            assert_approval_usable(approval, mission_id=mission_id, action=action, scope=scope, now_iso=now)
+        except FounderRuntimeError:
+            return False
+        return True
+
+    def _resolve_with_governance(self, mission_id: str, requirement, *, action: str, scope: str) -> dict[str, Any]:
+        now = self.clock.now_iso()
+        approvals = self.runtime.store.list_approvals(mission_id)
+
+        # 0. A Governance-decided ALLOW this resolver recorded but never spent
+        #    (a crash between record and transition). Governance already
+        #    decided; spend it, ask nothing twice.
+        for existing in approvals:
+            if resolver.is_governance_decided(existing) and self._usable(
+                    existing, mission_id=mission_id, action=action, scope=scope, now=now):
+                self.runtime.transition(mission_id, MissionState.QUEUED, reason="approval_resolved_replay",
+                                        actor=resolver.RESOLVER_ACTOR, approval_id=existing.approval_id)
+                res = resolver.Resolution(outcome=resolver.RESOLVED_QUEUED, reason_code="RESOLVER_REPLAY",
+                                          authorization_id=existing.decided_by.split(":", 1)[1],
+                                          evidence_refs=list(existing.evidence_refs),
+                                          detail={"spent_approval": existing.approval_id, "replayed": True})
+                return self._resolution_dict(res, facts=None, founder_approval=None)
+
+        # 1. An externally decided ALLOW (the founder, over the gate route). It
+        #    is never spent on its own say-so: its SIGNED artifact is presented
+        #    to Governance, and only Governance's allow spends it.
+        external = None
+        for existing in approvals:
+            if resolver.is_governance_decided(existing):
+                continue
+            if self._usable(existing, mission_id=mission_id, action=action, scope=scope, now=now):
+                external = existing
+                break
+        founder_approval = governance_approval_from(external) if external is not None else None
+
+        # 2. Preconditions. Each is a named park, never a default-open.
+        if self.governance is None:
+            return self._resolution_dict(
+                resolver.unresolved("RESOLVER_GOVERNANCE_PORT_ABSENT",
+                                    hint="run the API through the live composition root to attach Governance"),
+                facts=None, founder_approval=founder_approval)
+        if not self.attested_source_sha:
+            return self._resolution_dict(
+                resolver.unresolved("SOURCE_SHA_UNATTESTED",
+                                    hint="the composition root must attest this runtime's git source SHA"),
+                facts=None, founder_approval=founder_approval)
+
+        # 3. The consequence, stated once, and Governance's answer to it.
+        nonce = resolver.resolver_nonce(mission_id, now, attempt=str(len(approvals)))
+        facts = resolver.resolver_facts(
+            mission_id, requirement, action=action, scope=scope,
+            source_sha=self.attested_source_sha, nonce=nonce, issued_at=now,
+        )
+        meta = AdapterRequestMeta(correlation_id=mission_id, observed_at=now, mission_id=mission_id,
+                                  step_id=resolver.RESOLVER_STEP, authority_class=requirement.authority_class)
+        try:
+            answer = self.governance.authorize(facts, founder_approval=founder_approval, meta=meta,
+                                               grant=self.founder_grant)
+        except Exception as exc:  # noqa: BLE001 — an unreachable authority parks the mission
+            return self._resolution_dict(
+                resolver.unresolved("GOVERNANCE_UNREACHABLE", cause=type(exc).__name__),
+                facts=facts, founder_approval=founder_approval)
+        if getattr(answer, "status", None) != "success":
+            return self._resolution_dict(
+                resolver.unresolved("GOVERNANCE_ADAPTER_" + str(getattr(answer, "error_code", None) or "FAILED"),
+                                    adapter_status=str(getattr(answer, "status", "unknown"))),
+                facts=facts, founder_approval=founder_approval)
+        envelope = dict(getattr(answer, "payload", {}) or {})
+        res = resolver.resolve_envelope(
+            envelope, mission_id=mission_id, requirement=requirement, action=action, scope=scope,
+            now_iso=now, external_approval_id=external.approval_id if external is not None else None,
+        )
+
+        # 4. Record Governance's answer on the mission's own chain, then apply
+        #    exactly that answer through the kernel.
+        self.runtime._record_same_state_event(
+            mission_id, EventType.GOVERNANCE_RECORDED, f"approval_resolver:{res.outcome}",
+            {"approval_resolver": {
+                **res.to_dict(),
+                "facts_hash": hash_payload(facts),
+                "facts_nonce": nonce,
+                "source_sha": self.attested_source_sha,
+                "founder_approval_presented": founder_approval is not None,
+                "grant_presented": self.founder_grant is not None,
+                "decision_receipt_hash": envelope.get("decision_receipt_hash"),
+            }},
+            f"resolver:{mission_id}:{res.authorization_id or nonce}",
+            evidence_refs=list(res.evidence_refs),
+        )
+        if res.outcome == resolver.RESOLVED_QUEUED:
+            if external is not None:
+                approval_id = external.approval_id
+            else:
+                approval_id = self.runtime.record_approval(res.approval).approval_id
+            self.runtime.transition(mission_id, MissionState.QUEUED, reason="approval_resolved",
+                                    actor=resolver.RESOLVER_ACTOR, approval_id=approval_id)
+        elif res.outcome == resolver.FOUNDER_REQUIRED:
+            # Publish what the founder's signature must bind to, unless the
+            # mission already published its own request (a long-horizon
+            # mission is its own publisher; never overwrite it).
+            if self.runtime.published_authorization_request(mission_id) is None and res.scope_key:
+                self.runtime.record_authorization_request(mission_id, {
+                    "mission_id": mission_id,
+                    "action": action,
+                    "scope": scope,
+                    "source_sha": self.attested_source_sha,
+                    "scope_key": res.scope_key,
+                    "risk_tier": res.risk_tier or "",
+                    "component": facts["component"],
+                    "lane": facts["lane"],
+                    "action_class": facts["action_class"],
+                    "mode": "api",
+                })
+        elif res.outcome == resolver.BLOCKED_POLICY:
+            self.runtime.transition(mission_id, MissionState.BLOCKED_POLICY,
+                                    reason=f"governance_deny:{res.reason_code}",
+                                    actor=resolver.RESOLVER_ACTOR)
+        return self._resolution_dict(res, facts=facts, founder_approval=founder_approval, envelope=envelope)
+
+    def _resolution_dict(self, res, *, facts, founder_approval, envelope=None) -> dict[str, Any]:
+        out = res.to_dict()
+        out["facts_nonce"] = facts["nonce"] if facts else None
+        out["facts_hash"] = hash_payload(facts) if facts else None
+        out["source_sha"] = self.attested_source_sha or None
+        out["founder_approval_presented"] = founder_approval is not None
+        out["grant_presented"] = self.founder_grant is not None
+        if envelope is not None:
+            out["governance"] = {k: envelope.get(k) for k in (
+                "authorization_id", "decision", "reason_code", "risk_tier", "risk_model_version",
+                "decision_receipt_hash", "receipt_seq", "issued_at", "expires_at", "approver_ids",
+            )}
+        if res.outcome == resolver.FOUNDER_REQUIRED:
+            out["founder_gate"] = {
+                "approve_route": "/v1/missions/{mission_id}/gate/approve",
+                "reject_route": "/v1/missions/{mission_id}/gate/reject",
+                "resolve_route": "/v1/missions/{mission_id}/gate/resolve",
+                "signs": "gov.founder.approval.v1 scope_once bound to the published scope_key + source_sha + risk_tier",
+                "note": "a human decision is required for this consequence; the resolver will not manufacture one",
+            }
+        return out
 
     def approve_plan(self, mission_id: str, *, reason: str, idempotency_key: str,
                      expected_version: int | None = None) -> dict[str, Any]:
