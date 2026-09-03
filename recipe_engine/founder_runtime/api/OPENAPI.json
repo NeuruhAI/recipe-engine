@@ -20,6 +20,16 @@
             "maxLength": 500,
             "title": "Title",
             "type": "string"
+          },
+          "work_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSpecBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -91,6 +101,83 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkSpecBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code_custody_required": {
+            "title": "Code Custody Required",
+            "type": "boolean"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "external_message": {
+            "title": "External Message",
+            "type": "boolean"
+          },
+          "intelligence_layer": {
+            "enum": [
+              "L0_DETERMINISTIC",
+              "L1_NEURUH_DETERMINISTIC",
+              "L2_LOCAL_MODEL",
+              "L3_CHEAP_REMOTE_MODEL",
+              "L4_FRONTIER_MODEL"
+            ],
+            "title": "Intelligence Layer",
+            "type": "string"
+          },
+          "irreversible": {
+            "title": "Irreversible",
+            "type": "boolean"
+          },
+          "money_move": {
+            "title": "Money Move",
+            "type": "boolean"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "private_ip_risk": {
+            "title": "Private Ip Risk",
+            "type": "boolean"
+          },
+          "production_mutation": {
+            "title": "Production Mutation",
+            "type": "boolean"
+          },
+          "schema": {
+            "const": "fr.work_spec.v1",
+            "title": "Schema",
+            "type": "string"
+          },
+          "workflow_name": {
+            "minLength": 1,
+            "title": "Workflow Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "workflow_name",
+          "params",
+          "intelligence_layer",
+          "evidence_refs",
+          "production_mutation",
+          "external_message",
+          "money_move",
+          "irreversible",
+          "private_ip_risk",
+          "code_custody_required"
+        ],
+        "title": "WorkSpecBody",
         "type": "object"
       }
     }

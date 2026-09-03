@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from recipe_engine.founder_runtime import RUNTIME_VERSION
 from recipe_engine.founder_runtime.clock import Clock, SystemClock
@@ -98,6 +98,7 @@ class MissionRuntime:
         *,
         creation_idempotency_key: str = "",
         envelope: AuthorityEnvelope = AuthorityEnvelope.READ_ONLY_FIXTURE,
+        work_spec: Mapping[str, Any] | None = None,
     ) -> Mission:
         now = self.clock.now_iso()
         mission, interpretation = compile_intent_to_mission(
@@ -105,6 +106,7 @@ class MissionRuntime:
             clock_now=now,
             creation_idempotency_key=creation_idempotency_key,
             envelope=envelope,
+            work_spec=work_spec,
         )
         creation_event = self._event(
             mission, prior=None, next_state=mission.current_state,

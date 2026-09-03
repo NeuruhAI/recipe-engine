@@ -6,20 +6,22 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
+from recipe_engine.founder_runtime.errors import MissionSchemaInvalid
 from recipe_engine.founder_runtime.ids import hash_payload
 from recipe_engine.founder_runtime.state.states import MissionState
+
 from .authority import AuthorityRequirement, AuthorityClass
+from .work_spec import WorkSpec
 
 
-SCHEMA_MISSION = "fr.mission.v2"
+SCHEMA_MISSION = "fr.mission.v3"
 SCHEMA_PRINCIPAL = "fr.principal.v1"
 SCHEMA_DELIVERABLE = "fr.deliverable.v1"
 
-# Mission contract v2 adds the Phase-4 fields absent from v1: non_goals, world,
-# domain, time_budget, resource_budget, required_evidence and approval_gates.
-# v1 rows remain loadable — every added field defaults, and validate_mission_dict
-# accepts any "fr.mission" schema prefix.
+# Mission contract v3 adds the optional immutable executable work specification.
+# v1/v2 rows remain loadable because every added field defaults.
 SCHEMA_MISSION_V1 = "fr.mission.v1"
+SCHEMA_MISSION_V2 = "fr.mission.v2"
 
 
 class MissionClass(str, Enum):
@@ -172,9 +174,11 @@ class Mission:
     required_evidence: list[str] = field(default_factory=list)
     approval_gates: list[str] = field(default_factory=list)
     extensions: dict[str, Any] = field(default_factory=dict)
+    work_spec: WorkSpec | None = None
+    work_spec_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        body = {
             "schema_version": self.schema_version,
             "mission_id": self.mission_id,
             "version": self.version,
@@ -209,6 +213,10 @@ class Mission:
             "approval_gates": list(self.approval_gates),
             "extensions": dict(self.extensions),
         }
+        if self.schema_version not in (SCHEMA_MISSION_V1, SCHEMA_MISSION_V2):
+            body["work_spec"] = self.work_spec.to_dict() if self.work_spec is not None else None
+            body["work_spec_sha256"] = self.work_spec_sha256
+        return body
 
     def recompute_input_hash(self) -> str:
         payload = {
@@ -230,14 +238,36 @@ class Mission:
             "required_evidence": list(self.required_evidence),
             "approval_gates": list(self.approval_gates),
         }
+        if self.work_spec is not None:
+            payload["work_spec"] = self.work_spec.to_dict()
+            payload["work_spec_sha256"] = self.work_spec_sha256
         self.input_hash = hash_payload(payload)
         return self.input_hash
 
     @staticmethod
     def from_dict(d: Mapping[str, Any]) -> "Mission":
+        mission_id = str(d["mission_id"])
+        raw_work_spec = d.get("work_spec")
+        raw_work_spec_sha256 = d.get("work_spec_sha256")
+        if (raw_work_spec is None) != (raw_work_spec_sha256 is None):
+            raise MissionSchemaInvalid(
+                "mission work_spec and work_spec_sha256 must be present together",
+                {"mission_id": mission_id},
+            )
+        work_spec = (
+            WorkSpec.from_dict(raw_work_spec, mission_id=mission_id)
+            if raw_work_spec is not None
+            else None
+        )
+        work_spec_sha256 = str(raw_work_spec_sha256) if raw_work_spec_sha256 is not None else None
+        if work_spec is not None and work_spec.sha256() != work_spec_sha256:
+            raise MissionSchemaInvalid(
+                "mission work_spec hash mismatch",
+                {"mission_id": mission_id},
+            )
         return Mission(
             schema_version=str(d["schema_version"]),
-            mission_id=str(d["mission_id"]),
+            mission_id=mission_id,
             version=int(d["version"]),
             principal=Principal.from_dict(d["principal"]),
             title=str(d["title"]),
@@ -269,6 +299,8 @@ class Mission:
             required_evidence=list(d.get("required_evidence") or []),
             approval_gates=list(d.get("approval_gates") or []),
             extensions=dict(d.get("extensions") or {}),
+            work_spec=work_spec,
+            work_spec_sha256=work_spec_sha256,
         )
 
 
@@ -305,4 +337,15 @@ def validate_mission_dict(d: Mapping[str, Any]) -> list[str]:
         ac = ar.get("authority_class") if isinstance(ar, Mapping) else None
         if ac not in VALID_AUTHORITY:
             errs.append(f"invalid authority_class: {ac}")
+    raw_work_spec = d.get("work_spec")
+    raw_work_spec_sha256 = d.get("work_spec_sha256")
+    if (raw_work_spec is None) != (raw_work_spec_sha256 is None):
+        errs.append("work_spec and work_spec_sha256 must be present together")
+    elif raw_work_spec is not None:
+        try:
+            work_spec = WorkSpec.from_dict(raw_work_spec, mission_id=str(d.get("mission_id") or ""))
+            if work_spec.sha256() != raw_work_spec_sha256:
+                errs.append("work_spec_sha256 mismatch")
+        except MissionSchemaInvalid as exc:
+            errs.append(exc.message)
     return errs
