@@ -171,6 +171,7 @@ def resolver_nonce(mission_id: str, issued_at: str, attempt: str = "") -> str:
 # refused — by a process running a different one. Governance binds a founder's
 # signature to the SHA the same way; this is the local half of that contract.
 SOURCE_SHA_EVIDENCE_PREFIX = "governance:source_sha:"
+WORK_SPEC_SHA256_EVIDENCE_PREFIX = "founder_runtime:work_spec_sha256:"
 
 
 def bound_source_sha(approval: Approval) -> str:
@@ -178,6 +179,14 @@ def bound_source_sha(approval: Approval) -> str:
     for ref in approval.evidence_refs:
         if isinstance(ref, str) and ref.startswith(SOURCE_SHA_EVIDENCE_PREFIX):
             return ref[len(SOURCE_SHA_EVIDENCE_PREFIX):]
+    return ""
+
+
+def bound_work_spec_sha256(approval: Approval) -> str:
+    """The immutable work specification a recorded approval authorizes, or ""."""
+    for ref in approval.evidence_refs:
+        if isinstance(ref, str) and ref.startswith(WORK_SPEC_SHA256_EVIDENCE_PREFIX):
+            return ref[len(WORK_SPEC_SHA256_EVIDENCE_PREFIX):]
     return ""
 
 
@@ -190,6 +199,7 @@ def resolver_facts(
     source_sha: str,
     nonce: str,
     issued_at: str,
+    work_spec_sha256: str | None = None,
 ) -> dict[str, Any]:
     """The exact ``gov.action.facts.v1`` this mission presents for its gate.
 
@@ -225,6 +235,13 @@ def resolver_facts(
         facts["branch"] = consequence.branch_template.format(mission_id=mission_id)
     if consequence.rollback_plan:
         facts["rollback_plan"] = consequence.rollback_plan
+    if work_spec_sha256 is not None:
+        if (
+            len(work_spec_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in work_spec_sha256)
+        ):
+            raise ValueError("resolver facts require a canonical work specification SHA-256")
+        facts["precondition_hash"] = work_spec_sha256
     return facts
 
 
@@ -271,6 +288,7 @@ def governance_decided_approval(
     scope: str,
     now_iso: str,
     source_sha: str = "",
+    work_spec_sha256: str | None = None,
 ) -> Approval:
     """The approval record a Governance ALLOW backs.
 
@@ -290,6 +308,8 @@ def governance_decided_approval(
         SOURCE_SHA_EVIDENCE_PREFIX + str(source_sha or ""),
         f"governance:action_class:{requirement.authority_class.value}",
     ]
+    if work_spec_sha256 is not None:
+        evidence.append(WORK_SPEC_SHA256_EVIDENCE_PREFIX + work_spec_sha256)
     return Approval(
         schema_version=SCHEMA_APPROVAL,
         approval_id=stable_id("appr", mission_id, "resolver", authorization_id),
@@ -327,6 +347,7 @@ def resolve_envelope(
     now_iso: str,
     external_approval_id: str | None = None,
     source_sha: str = "",
+    work_spec_sha256: str | None = None,
 ) -> Resolution:
     """Map one Governance authorization envelope to a resolver outcome.
 
@@ -357,6 +378,7 @@ def resolve_envelope(
             approval = governance_decided_approval(
                 envelope, mission_id=mission_id, requirement=requirement,
                 action=action, scope=scope, now_iso=now_iso, source_sha=source_sha,
+                work_spec_sha256=work_spec_sha256,
             )
             if approval.expiry and approval.expiry <= now_iso:
                 return Resolution(outcome=UNRESOLVED, **{**base, "reason_code": "GOVERNANCE_DECISION_EXPIRED"})
@@ -415,7 +437,8 @@ __all__ = [
     "ConsequenceUnclassified", "FOUNDER_DENIED", "FOUNDER_REQUIRED",
     "GOVERNANCE_DECIDER_PREFIX", "OUTCOMES", "RESOLVED_QUEUED", "RESOLVER_ACTOR",
     "RESOLVER_LANE", "RESOLVER_STEP", "RESOLVER_VERSION", "Resolution",
-    "SOURCE_SHA_EVIDENCE_PREFIX", "UNRESOLVED", "bound_source_sha", "consequence_for",
+    "SOURCE_SHA_EVIDENCE_PREFIX", "UNRESOLVED", "WORK_SPEC_SHA256_EVIDENCE_PREFIX",
+    "bound_source_sha", "bound_work_spec_sha256", "consequence_for",
     "founder_denied", "governance_decided_approval", "is_governance_decided",
     "resolve_envelope", "resolver_facts", "resolver_nonce", "resolver_scope_key",
     "unresolved",

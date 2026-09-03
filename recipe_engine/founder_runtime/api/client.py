@@ -11,7 +11,7 @@ import json
 import urllib.request
 import urllib.error
 import uuid
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 
 class ApiClientError(Exception):
@@ -91,9 +91,17 @@ class FounderRuntimeClient:
 
     # writes
     def create_mission(self, objective: str, *, title: str = "", done_criteria: str = "",
+                       work_spec: Mapping[str, Any] | None = None,
                        idempotency_key: str | None = None) -> dict:
+        body: dict[str, Any] = {
+            "objective": objective,
+            "title": title,
+            "done_criteria": done_criteria,
+        }
+        if work_spec is not None:
+            body["work_spec"] = dict(work_spec)
         return self._req("POST", "/v1/missions",
-                         body={"objective": objective, "title": title, "done_criteria": done_criteria},
+                         body=body,
                          idempotency_key=idempotency_key or self._key())
 
     def approve(self, mission_id: str, *, reason: str = "", idempotency_key: str | None = None,

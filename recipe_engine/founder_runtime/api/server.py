@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from recipe_engine.founder_runtime.api.adapters import organ_status
 from recipe_engine.founder_runtime.api.auth import AuthError, OperatorAuth
@@ -26,10 +26,33 @@ from recipe_engine.founder_runtime.api.service import ApiError, MissionService, 
 MAX_BODY = 64 * 1024  # 64 KiB — reject oversized payloads
 
 
+class WorkSpecBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal["fr.work_spec.v1"] = Field(alias="schema")
+    workflow_name: str = Field(min_length=1)
+    params: dict[str, Any]
+    intelligence_layer: Literal[
+        "L0_DETERMINISTIC",
+        "L1_NEURUH_DETERMINISTIC",
+        "L2_LOCAL_MODEL",
+        "L3_CHEAP_REMOTE_MODEL",
+        "L4_FRONTIER_MODEL",
+    ]
+    evidence_refs: list[str]
+    production_mutation: bool
+    external_message: bool
+    money_move: bool
+    irreversible: bool
+    private_ip_risk: bool
+    code_custody_required: bool
+
+
 class CreateMissionBody(BaseModel):
     objective: str = Field(min_length=1, max_length=8000)
     title: str = Field(default="", max_length=500)
     done_criteria: str = Field(default="", max_length=4000)
+    work_spec: WorkSpecBody | None = None
 
 
 class DecisionBody(BaseModel):
@@ -115,7 +138,9 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
         key = _idem_key(idempotency_key)
         return await run_in_threadpool(
             service.create_mission, objective=body.objective, title=body.title,
-            done_criteria=body.done_criteria, idempotency_key=key)
+            done_criteria=body.done_criteria,
+            work_spec=body.work_spec.model_dump(by_alias=True) if body.work_spec is not None else None,
+            idempotency_key=key)
 
     @app.get("/v1/missions", dependencies=[Depends(require_auth)])
     async def list_missions():

@@ -136,8 +136,15 @@ class SqliteStore:
                     (mission.creation_idempotency_key,),
                 ).fetchone()
                 if existing:
+                    existing_mission = Mission.from_dict(json.loads(existing["body_json"]))
+                    if existing_mission.input_hash != mission.input_hash:
+                        c.execute("ROLLBACK")
+                        raise PersistenceConflict(
+                            "mission creation idempotency key reused for different mission material",
+                            {"idempotency_key": mission.creation_idempotency_key},
+                        )
                     c.execute("COMMIT")
-                    return Mission.from_dict(json.loads(existing["body_json"]))
+                    return existing_mission
             if (
                 creation_event.event_type != EventType.MISSION_CREATED
                 or creation_event.schema_version != SCHEMA_EVENT

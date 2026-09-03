@@ -18,7 +18,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from recipe_engine.autonomy import collapse_scenarios, compile_execution_plan, default_config
 from recipe_engine.autonomy.models import (
@@ -37,9 +37,10 @@ from recipe_engine.founder_runtime.clock import SystemClock
 from recipe_engine.founder_runtime.contracts.approval import Approval, ApprovalDecision, SCHEMA_APPROVAL
 from recipe_engine.founder_runtime.contracts.events import EventType
 from recipe_engine.founder_runtime.contracts.mission import Mission
+from recipe_engine.founder_runtime.contracts.work_spec import validate_work_spec_request
 from recipe_engine.founder_runtime.errors import (
     ApprovalRequired, AuthorityDenied, FounderRuntimeError, MissionNotFound,
-    PersistenceConflict, StateTransitionInvalid,
+    MissionSchemaInvalid, PersistenceConflict, StateTransitionInvalid,
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
 from recipe_engine.founder_runtime.ids import hash_payload, new_uuid, stable_id
@@ -183,10 +184,21 @@ class MissionService:
         state = mission.current_state.value
         approvals = self.runtime.store.list_approvals(mission.mission_id)
         latest_approval = approvals[-1].to_dict() if approvals else None
+        authority_state = self._authority_state(mission, approvals)
         authority = {
             "requirements": [a.to_dict() for a in mission.authority_requirements],
             "latest_approval": latest_approval,
-            "state": self._authority_state(mission, approvals),
+            "state": authority_state,
+            "work_spec_sha256": mission.work_spec_sha256,
+            "work_spec_authorized": bool(
+                mission.work_spec_sha256
+                and authority_state == "APPROVED"
+                and any(
+                    approval.decision in (ApprovalDecision.ALLOW, ApprovalDecision.CONSUMED)
+                    and resolver.bound_work_spec_sha256(approval) == mission.work_spec_sha256
+                    for approval in approvals
+                )
+            ),
             "mutation_authorized": False,
             "external_action_authorized": False,
             "production_persistence_authorized": False,
@@ -202,6 +214,9 @@ class MissionService:
             "mission_id": mission.mission_id,
             "state": state,
             "version": mission.version,
+            "objective": mission.objective,
+            "work_spec": mission.work_spec.to_dict() if mission.work_spec is not None else None,
+            "work_spec_sha256": mission.work_spec_sha256,
             "evidence_refs": list(evidence_refs or []) + [r.receipt_id for r in receipts],
             "authority": authority,
             "allowed_next_actions": list(_ALLOWED_NEXT.get(state, ["get"])),
@@ -216,6 +231,13 @@ class MissionService:
             return self.runtime.get_mission(mission_id)
         except MissionNotFound as e:
             raise ApiError(404, "MISSION_NOT_FOUND", "mission not found", {"mission_id": mission_id}) from e
+        except MissionSchemaInvalid as e:
+            raise ApiError(
+                409,
+                "INTEGRITY_FAILURE",
+                "mission work specification failed integrity validation",
+                {"mission_id": mission_id, **e.details},
+            ) from e
 
     def _assert_version(self, mission: Mission, expected_version: int | None) -> None:
         if expected_version is not None and expected_version != mission.version:
@@ -244,6 +266,11 @@ class MissionService:
             return "BLOCKED"
         for a in reversed(approvals):
             if a.decision in (ApprovalDecision.ALLOW, ApprovalDecision.CONSUMED):
+                if (
+                    mission.work_spec_sha256 is not None
+                    and resolver.bound_work_spec_sha256(a) != mission.work_spec_sha256
+                ):
+                    continue
                 # A consumed approval was an ALLOW that the kernel spent on the
                 # gated transition; the authority truth is still APPROVED.
                 return "APPROVED"
@@ -253,7 +280,16 @@ class MissionService:
 
     def _assert_not_corrupted(self, mission_id: str) -> None:
         """Fail closed if the mission's event chain fails integrity verification."""
-        verdict = self.runtime.store.verify_mission_chain(mission_id)
+        try:
+            verdict = self.runtime.store.verify_mission_chain(mission_id)
+            self.runtime.replay(mission_id)
+        except Exception as exc:  # noqa: BLE001 — malformed persisted material is untrusted
+            raise ApiError(
+                409,
+                "INTEGRITY_FAILURE",
+                "mission projection does not match its authoritative event chain",
+                {"mission_id": mission_id, "cause": type(exc).__name__},
+            ) from exc
         if not verdict["ok"]:
             raise ApiError(409, "INTEGRITY_FAILURE",
                            "mission event store failed integrity verification; "
@@ -412,15 +448,33 @@ class MissionService:
 
     # ---- public operations ----
     def create_mission(self, *, objective: str, title: str = "", done_criteria: str = "",
+                       work_spec: Mapping[str, Any] | None = None,
                        idempotency_key: str, expected_version: int | None = None) -> dict[str, Any]:
-        request_hash = hash_payload({"objective": objective, "title": title, "done_criteria": done_criteria})
+        try:
+            normalized_work_spec = (
+                validate_work_spec_request(work_spec) if work_spec is not None else None
+            )
+        except MissionSchemaInvalid as exc:
+            raise ApiError(422, "WORK_SPEC_INVALID", exc.message, exc.details) from exc
+        request_material: dict[str, Any] = {
+            "objective": objective,
+            "title": title,
+            "done_criteria": done_criteria,
+        }
+        if normalized_work_spec is not None:
+            request_material["work_spec"] = normalized_work_spec
+        request_hash = hash_payload(request_material)
         cached = self._idem_lookup(idempotency_key, request_hash)
         if cached is not None:
             cached["idempotent_replay"] = True
             return cached
         with self._lock:
             request_text = objective if not done_criteria else f"{objective}\nDone when: {done_criteria}"
-            mission = self.runtime.create_mission_from_text(request_text, creation_idempotency_key=idempotency_key)
+            mission = self.runtime.create_mission_from_text(
+                request_text,
+                creation_idempotency_key=idempotency_key,
+                work_spec=normalized_work_spec,
+            )
             mid = mission.mission_id
             result: dict[str, Any]
             if mission.extensions.get("initial_block") == "BLOCKED_INPUT":
@@ -457,7 +511,17 @@ class MissionService:
             return self._list_missions_impl()
 
     def _list_missions_impl(self) -> dict[str, Any]:
-        missions = self.runtime.store.list_missions()
+        try:
+            missions = self.runtime.store.list_missions()
+        except MissionSchemaInvalid as exc:
+            raise ApiError(
+                409,
+                "INTEGRITY_FAILURE",
+                "a persisted mission failed work specification validation",
+                exc.details,
+            ) from exc
+        for mission in missions:
+            self._assert_not_corrupted(mission.mission_id)
         return {
             "count": len(missions),
             "missions": [self._envelope(m) for m in missions],
@@ -496,8 +560,16 @@ class MissionService:
         with self._lock:
             self._require_expected_version(expected_version)
             mission = self._get(mission_id)
-            request_hash = hash_payload({"decision": decision.value, "reason": reason,
-                                         "mission_id": mission_id, "gate": gate})
+            self._assert_not_corrupted(mission_id)
+            request_material = {
+                "decision": decision.value,
+                "reason": reason,
+                "mission_id": mission_id,
+                "gate": gate,
+            }
+            if mission.work_spec_sha256 is not None:
+                request_material["work_spec_sha256"] = mission.work_spec_sha256
+            request_hash = hash_payload(request_material)
             # Exact replay returns the stored receipt even after the state advanced.
             cached = self._idem_lookup(idempotency_key, request_hash)
             if cached is not None:
@@ -569,9 +641,19 @@ class MissionService:
             # as a signed refusal to spend, and minting one would only create an
             # artifact whose existence could be mistaken for permission.
             evidence_refs = [mission.plan_id or ""]
+            if mission.work_spec_sha256 is not None:
+                evidence_refs.append(
+                    resolver.WORK_SPEC_SHA256_EVIDENCE_PREFIX + mission.work_spec_sha256,
+                )
             signed_note = None
             if gate and decision == ApprovalDecision.ALLOW:
-                signed_note = self._mint_gate_artifact(mission_id, action=requested_action, scope=scope, now=now)
+                signed_note = self._mint_gate_artifact(
+                    mission_id,
+                    action=requested_action,
+                    scope=scope,
+                    now=now,
+                    work_spec_sha256=mission.work_spec_sha256,
+                )
                 if signed_note is not None:
                     evidence_refs.append(signed_note)
             approval = Approval(
@@ -613,7 +695,15 @@ class MissionService:
             self._idem_store(idempotency_key, request_hash, result)
             return result
 
-    def _mint_gate_artifact(self, mission_id: str, *, action: str, scope: str, now: str) -> str | None:
+    def _mint_gate_artifact(
+        self,
+        mission_id: str,
+        *,
+        action: str,
+        scope: str,
+        now: str,
+        work_spec_sha256: str | None,
+    ) -> str | None:
         """The signed Governance approval for this mission's published request.
 
         Returns None — never a partial or improvised artifact — when the mission
@@ -627,6 +717,8 @@ class MissionService:
         if not published:
             return None
         if published.get("action") != action or published.get("scope") != scope:
+            return None
+        if published.get("work_spec_sha256") != work_spec_sha256:
             return None
         scope_key = published.get("scope_key")
         source_sha = published.get("source_sha")
@@ -662,7 +754,11 @@ class MissionService:
             if not internal:
                 self._require_expected_version(expected_version)
             mission = self._get(mission_id)
-            request_hash = hash_payload({"resolve": mission_id})
+            self._assert_not_corrupted(mission_id)
+            request_material = {"resolve": mission_id}
+            if mission.work_spec_sha256 is not None:
+                request_material["work_spec_sha256"] = mission.work_spec_sha256
+            request_hash = hash_payload(request_material)
             cached = self._idem_lookup(idempotency_key, request_hash)
             if cached is not None:
                 cached["idempotent_replay"] = True
@@ -680,7 +776,7 @@ class MissionService:
                                "mission carries no trusted authority classification", {})
             requirement = mission.authority_requirements[0]
             action, scope = gated_action_for(MissionState.AWAITING_APPROVAL, MissionState.QUEUED)
-            resolution = self._resolve_with_governance(mission_id, requirement, action=action, scope=scope)
+            resolution = self._resolve_with_governance(mission, requirement, action=action, scope=scope)
             body = self._envelope(self._get(mission_id), evidence_refs=list(resolution.get("evidence_refs") or []))
             result = {
                 "envelope": body,
@@ -699,7 +795,8 @@ class MissionService:
             return False
         return True
 
-    def _resolve_with_governance(self, mission_id: str, requirement, *, action: str, scope: str) -> dict[str, Any]:
+    def _resolve_with_governance(self, mission: Mission, requirement, *, action: str, scope: str) -> dict[str, Any]:
+        mission_id = mission.mission_id
         now = self.clock.now_iso()
         approvals = self.runtime.store.list_approvals(mission_id)
 
@@ -750,6 +847,11 @@ class MissionService:
                 continue
             if resolver.bound_source_sha(existing) != self.attested_source_sha:
                 continue
+            if (
+                mission.work_spec_sha256 is not None
+                and resolver.bound_work_spec_sha256(existing) != mission.work_spec_sha256
+            ):
+                continue
             self.runtime.transition(mission_id, MissionState.QUEUED, reason="approval_resolved_replay",
                                     actor=resolver.RESOLVER_ACTOR, approval_id=existing.approval_id)
             res = resolver.Resolution(outcome=resolver.RESOLVED_QUEUED, reason_code="RESOLVER_REPLAY",
@@ -757,7 +859,8 @@ class MissionService:
                                       evidence_refs=list(existing.evidence_refs),
                                       detail={"spent_approval": existing.approval_id, "replayed": True,
                                               "revalidated": ["mission", "action", "scope", "expiry",
-                                                              "unspent", "action_class", "source_sha"]})
+                                                              "unspent", "action_class", "source_sha",
+                                                              "work_spec_sha256"]})
             return self._resolution_dict(res, facts=None, founder_approval=None)
 
         # 3. An externally decided ALLOW (the founder, over the gate route). It
@@ -767,7 +870,13 @@ class MissionService:
         for existing in approvals:
             if resolver.is_governance_decided(existing):
                 continue
-            if self._usable(existing, mission_id=mission_id, action=action, scope=scope, now=now):
+            if (
+                self._usable(existing, mission_id=mission_id, action=action, scope=scope, now=now)
+                and (
+                    mission.work_spec_sha256 is None
+                    or resolver.bound_work_spec_sha256(existing) == mission.work_spec_sha256
+                )
+            ):
                 external = existing
                 break
         founder_approval = governance_approval_from(external) if external is not None else None
@@ -777,6 +886,7 @@ class MissionService:
         facts = resolver.resolver_facts(
             mission_id, requirement, action=action, scope=scope,
             source_sha=self.attested_source_sha, nonce=nonce, issued_at=now,
+            work_spec_sha256=mission.work_spec_sha256,
         )
         meta = AdapterRequestMeta(correlation_id=mission_id, observed_at=now, mission_id=mission_id,
                                   step_id=resolver.RESOLVER_STEP, authority_class=requirement.authority_class,
@@ -798,6 +908,7 @@ class MissionService:
             envelope, mission_id=mission_id, requirement=requirement, action=action, scope=scope,
             now_iso=now, external_approval_id=external.approval_id if external is not None else None,
             source_sha=self.attested_source_sha,
+            work_spec_sha256=mission.work_spec_sha256,
         )
 
         # 4. Record Governance's answer on the mission's own chain, then apply
@@ -809,6 +920,7 @@ class MissionService:
                 "facts_hash": hash_payload(facts),
                 "facts_nonce": nonce,
                 "source_sha": self.attested_source_sha,
+                "work_spec_sha256": mission.work_spec_sha256,
                 "founder_approval_presented": founder_approval is not None,
                 "grant_presented": self.founder_grant is not None,
                 "decision_receipt_hash": envelope.get("decision_receipt_hash"),
@@ -838,6 +950,7 @@ class MissionService:
                     "component": facts["component"],
                     "lane": facts["lane"],
                     "action_class": facts["action_class"],
+                    "work_spec_sha256": mission.work_spec_sha256,
                     "mode": "api",
                 })
         elif res.outcome == resolver.BLOCKED_POLICY:
