@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass
@@ -71,9 +70,10 @@ def _validate_json(value: Any, path: str = "$.params", depth: int = 0) -> Any:
             raise MissionSchemaInvalid("work spec integer is outside the safe range", {"path": path})
         return value
     if isinstance(value, float):
-        if not math.isfinite(value) or (value == 0.0 and math.copysign(1.0, value) < 0):
-            raise MissionSchemaInvalid("work spec float is not canonical", {"path": path})
-        return value
+        raise MissionSchemaInvalid(
+            "work spec floats are not persistence-stable; use an integer or string",
+            {"path": path},
+        )
     if isinstance(value, list):
         return [_validate_json(item, f"{path}[{index}]", depth + 1) for index, item in enumerate(value)]
     if isinstance(value, Mapping):
@@ -223,6 +223,12 @@ class WorkSpec:
             "private_ip_risk": self.private_ip_risk,
             "code_custody_required": self.code_custody_required,
         }
+
+    def request_dict(self) -> dict[str, Any]:
+        """Return caller-supplied identity material without derived fields."""
+        persisted = self.to_dict()
+        persisted.pop("candidate_id")
+        return persisted
 
     def sha256(self) -> str:
         return hash_payload(self.to_dict())

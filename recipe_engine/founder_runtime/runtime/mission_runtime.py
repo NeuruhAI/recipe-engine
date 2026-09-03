@@ -34,6 +34,7 @@ from recipe_engine.founder_runtime.runtime.recovery import recover_mission
 from recipe_engine.founder_runtime.runtime.approvals import (
     is_approval_gated, validate_approval_record, assert_approval_usable, gated_action_for,
 )
+from recipe_engine.founder_runtime.runtime.approval_resolver import bound_work_spec_sha256
 from recipe_engine.founder_runtime.observability.logging import RuntimeLog
 from recipe_engine.founder_runtime.observability.metrics import Metrics
 
@@ -472,6 +473,19 @@ class MissionRuntime:
             scope=scope,
             now_iso=now,
         )
+        if (
+            mission.work_spec_sha256 is not None
+            and bound_work_spec_sha256(approval) != mission.work_spec_sha256
+        ):
+            raise AuthorityDenied(
+                "approval work specification mismatch",
+                {
+                    "approval_id": approval_id,
+                    "mission_id": mission_id,
+                    "expected_work_spec_sha256": mission.work_spec_sha256,
+                    "approved_work_spec_sha256": bound_work_spec_sha256(approval),
+                },
+            )
         # Compute the consumed record, then authorize it on-log before materializing.
         approval.decision = ApprovalDecision.CONSUMED
         approval.consumed_by = f"transition:{transition_reason}"
@@ -491,6 +505,7 @@ class MissionRuntime:
                 "action": action,
                 "scope": scope,
                 "consumed_by": approval.consumed_by,
+                "work_spec_sha256": mission.work_spec_sha256,
             },
             evidence_refs=[f"approval:{approval_id}"],
         )

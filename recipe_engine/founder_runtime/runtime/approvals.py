@@ -56,6 +56,13 @@ def assert_approval_usable(
     now_iso: str,
 ) -> None:
     """Fail-closed checks at consumption time."""
+    recorded_hash = approval.approval_hash
+    computed_hash = approval.expected_hash()
+    if not recorded_hash or computed_hash != recorded_hash:
+        raise AuthorityDenied(
+            "approval integrity mismatch",
+            {"approval_id": approval.approval_id},
+        )
     if approval.mission_id != mission_id:
         raise AuthorityDenied("approval mission mismatch", {
             "approval_mission": approval.mission_id, "mission_id": mission_id,
