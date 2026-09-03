@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
+from recipe_engine.founder_runtime.api.openapi import generate
 from recipe_engine.founder_runtime.api.service import ApiError, MissionService
-from recipe_engine.founder_runtime.contracts.approval import ApprovalDecision
+from recipe_engine.founder_runtime.contracts.approval import (
+    SCHEMA_APPROVAL,
+    Approval,
+    ApprovalDecision,
+)
 from recipe_engine.founder_runtime.contracts.work_spec import (
     SCHEMA_WORK_SPEC,
     WorkSpec,
 )
+from recipe_engine.founder_runtime.errors import AuthorityDenied
 from recipe_engine.founder_runtime.runtime import approval_resolver as resolver
 from recipe_engine.founder_runtime.runtime.approvals import gated_action_for
 from recipe_engine.founder_runtime.state.states import MissionState
@@ -130,6 +140,9 @@ def test_08_governance_authority_receipt_binds_work_spec_hash(tmp_path):
     work_spec_sha256 = result["envelope"]["work_spec_sha256"]
     approval = service.runtime.store.list_approvals(mission_id)[-1]
     assert result["envelope"]["authority"]["work_spec_authorized"] is True
+    assert result["envelope"]["authority"]["work_spec_execution_authorized"] is True
+    assert result["envelope"]["authority"]["execution_authorized"] is True
+    assert result["envelope"]["authority"]["dispatch_approval_id"] == approval.approval_id
     assert resolver.bound_work_spec_sha256(approval) == work_spec_sha256
     assert governance.calls[-1]["facts"]["precondition_hash"] == work_spec_sha256
     service.close()
@@ -281,30 +294,51 @@ def test_17_no_spec_queued_mission_remains_eligible_and_unconsumed(tmp_path):
 def test_18_representation_constructs_one_workers_candidate_with_zero_inference(tmp_path):
     service = _service(tmp_path, "candidate")
     envelope = _create(service)["envelope"]
-    work_spec = envelope["work_spec"]
-    candidate = {
-        "candidate_id": work_spec["candidate_id"],
-        "workflow_name": work_spec["workflow_name"],
-        "params": work_spec["params"],
-        "layer": work_spec["intelligence_layer"],
-        "evidence_refs": tuple(work_spec["evidence_refs"]),
-        "production_mutation": work_spec["production_mutation"],
-        "external_message": work_spec["external_message"],
-        "money_move": work_spec["money_move"],
-        "irreversible": work_spec["irreversible"],
-        "private_ip_risk": work_spec["private_ip_risk"],
-    }
-    ticket = {
-        "mission_id": envelope["mission_id"],
-        "objective": envelope["objective"],
-        "fr_state": envelope["state"],
-        "fr_api_version": envelope["api_version"],
-        "code_custody_required": work_spec["code_custody_required"],
-    }
-    assert candidate["workflow_name"] == "property-research"
-    assert candidate["params"] == _spec()["params"]
-    assert ticket["fr_state"] == "QUEUED"
-    assert len([candidate]) == 1
+    default_root = Path(__file__).resolve().parents[3].parent / "neuruh-workers"
+    workers_root = Path(os.environ.get("NEURUH_WORKERS_ROOT", default_root))
+    if not (workers_root / "neuruh_workers" / "founder_runtime.py").is_file():
+        pytest.skip("canonical neuruh-workers checkout is unavailable")
+    script = """
+import json
+import sys
+
+from neuruh_workers.founder_runtime import (
+    DispatchTicket,
+    IntelligenceLayer,
+    WorkCandidate,
+    compile_context,
+    map_founder_runtime_dispatch,
+)
+from neuruh_workers.workflows import build_catalog
+
+envelope = json.load(sys.stdin)
+catalog = build_catalog()
+ticket, candidate = map_founder_runtime_dispatch(envelope, catalog=catalog)
+assert isinstance(ticket, DispatchTicket)
+assert isinstance(candidate, WorkCandidate)
+assert candidate.layer is IntelligenceLayer.L0
+definition = catalog.get(candidate.workflow_name)
+context = compile_context(ticket, candidate)
+assert definition.version == "1.0.0"
+assert definition.read_only is True
+assert candidate.params == {
+    "address": "123 Main St, Benton Harbor, MI",
+    "county": "Berrien",
+}
+assert context["candidate"]["layer"] == "L0_DETERMINISTIC"
+assert context["fr_state"] == "QUEUED"
+"""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(workers_root), env.get("PYTHONPATH", "")],
+    ).rstrip(os.pathsep)
+    subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps(envelope),
+        text=True,
+        env=env,
+        check=True,
+    )
     service.close()
 
 
@@ -388,3 +422,210 @@ def test_25_restart_with_tampered_persisted_material_fails_closed(tmp_path):
         reopened.get_mission(mission_id)
     assert caught.value.code == "INTEGRITY_FAILURE"
     reopened.close()
+
+
+@pytest.mark.parametrize("bound_hash", [None, "0" * 64])
+def test_26_kernel_rejects_unbound_or_mismatched_work_spec_approval(tmp_path, bound_hash):
+    service = _service(tmp_path, "kernel-binding", auto_resolve=False)
+    result = _create(service)
+    mission_id = result["envelope"]["mission_id"]
+    mission = service.runtime.get_mission(mission_id)
+    evidence_refs = []
+    if bound_hash is not None:
+        evidence_refs.append(resolver.WORK_SPEC_SHA256_EVIDENCE_PREFIX + bound_hash)
+    approval = Approval(
+        schema_version=SCHEMA_APPROVAL,
+        approval_id=f"appr_kernel_{bound_hash or 'missing'}",
+        mission_id=mission_id,
+        action_class=mission.authority_requirements[0].authority_class.value,
+        exact_requested_action=GATE_ACTION,
+        scope=GATE_SCOPE,
+        requested_by="court",
+        decided_by="governance:kernel-binding-court",
+        decision=ApprovalDecision.ALLOW,
+        conditions=[],
+        expiry=None,
+        evidence_refs=evidence_refs,
+        created_at=service.clock.now_iso(),
+        decided_at=service.clock.now_iso(),
+        idempotency_key=f"kernel-binding:{bound_hash or 'missing'}",
+    )
+    service.runtime.record_approval(approval)
+    service.close()
+    service = _service(tmp_path, "kernel-binding", auto_resolve=False)
+    with pytest.raises(AuthorityDenied):
+        service.runtime.transition(
+            mission_id,
+            MissionState.QUEUED,
+            reason="kernel_binding_court",
+            approval_id=approval.approval_id,
+        )
+    assert service.runtime.get_mission(mission_id).current_state == MissionState.AWAITING_APPROVAL
+    assert service.runtime.store.get_approval(approval.approval_id).decision == ApprovalDecision.ALLOW
+    service.close()
+
+
+def test_27_plan_approval_is_not_advertised_as_dispatch_authority(tmp_path):
+    service = _service(tmp_path, "plan-authority", auto_resolve=False)
+    created = _create(service)
+    approved = service.approve_plan(
+        created["envelope"]["mission_id"],
+        reason="plan only",
+        idempotency_key="plan-only",
+        expected_version=created["envelope"]["version"],
+    )
+    assert approved["envelope"]["state"] == "APPROVED_NO_EXECUTION"
+    assert approved["envelope"]["authority"]["state"] == "PLAN_APPROVED_NO_EXECUTION"
+    assert approved["envelope"]["authority"]["work_spec_authorized"] is False
+    assert approved["envelope"]["authority"]["work_spec_execution_authorized"] is False
+    assert approved["envelope"]["authority"]["execution_authorized"] is False
+    assert approved["envelope"]["authority"]["dispatch_approval_id"] is None
+    service.close()
+
+
+def test_28_creation_retry_survives_api_idempotency_cache_loss(tmp_path):
+    service = _service(tmp_path, "cache-loss")
+    first = _create(service, key="cache-loss")
+    mission_id = first["envelope"]["mission_id"]
+    version = first["envelope"]["version"]
+    candidate_id = first["envelope"]["work_spec"]["candidate_id"]
+    event_count = len(service.runtime.store.list_events(mission_id))
+    approval_count = len(service.runtime.store.list_approvals(mission_id))
+    immediate = _create(service, key="cache-loss")
+    assert immediate["idempotent_replay"] is True
+    assert immediate["envelope"]["mission_id"] == mission_id
+    assert immediate["envelope"]["work_spec"]["candidate_id"] == candidate_id
+    service._idem.execute("DELETE FROM idempotency WHERE key=?", ("cache-loss",))
+    service.close()
+
+    reopened = _service(tmp_path, "cache-loss")
+    replay = _create(reopened, key="cache-loss")
+    assert replay["idempotent_replay"] is True
+    assert replay["envelope"]["mission_id"] == mission_id
+    assert replay["envelope"]["version"] == version
+    assert replay["envelope"]["work_spec"]["candidate_id"] == candidate_id
+    assert len(reopened.runtime.store.list_events(mission_id)) == event_count
+    assert len(reopened.runtime.store.list_approvals(mission_id)) == approval_count
+    reopened.close()
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"confidence": 1.5},
+        {"nested": {"values": [1, True, None, {"confidence": 1.5}]}},
+    ],
+)
+def test_29_float_params_fail_closed_before_persistence(tmp_path, params):
+    service = _service(tmp_path, "float-params")
+    with pytest.raises(ApiError) as caught:
+        _create(service, spec=_spec(params=params))
+    assert caught.value.code == "WORK_SPEC_INVALID"
+    assert service.list_missions()["count"] == 0
+    service.close()
+
+
+def test_30_list_and_get_openapi_responses_publish_dispatch_contract():
+    spec = generate()
+    components = spec["components"]["schemas"]
+    assert "MissionEnvelopeBody" in components
+    envelope_properties = components["MissionEnvelopeBody"]["properties"]
+    for field in (
+        "api_version",
+        "mission_id",
+        "state",
+        "version",
+        "objective",
+        "work_spec",
+        "work_spec_sha256",
+        "authority",
+    ):
+        assert field in envelope_properties
+    authority_ref = envelope_properties["authority"]["$ref"].rsplit("/", 1)[-1]
+    authority_properties = components[authority_ref]["properties"]
+    for field in (
+        "state",
+        "work_spec_sha256",
+        "work_spec_execution_authorized",
+        "execution_authorized",
+        "dispatch_approval_id",
+    ):
+        assert field in authority_properties
+    for path in ("/v1/missions", "/v1/missions/{mission_id}"):
+        operation = spec["paths"][path]["get"]
+        schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        assert "$ref" in schema
+
+
+@pytest.mark.parametrize(
+    "changed_spec",
+    [
+        _spec(workflow_name="field-pin-enrichment"),
+        _spec(params={"address": "999 Other St"}),
+        _spec(private_ip_risk=True),
+    ],
+)
+def test_31_changed_spec_conflicts_after_api_cache_loss(tmp_path, changed_spec):
+    service = _service(tmp_path, "changed-after-cache-loss")
+    first = _create(service, key="changed-after-cache-loss")
+    mission_id = first["envelope"]["mission_id"]
+    service._idem.execute(
+        "DELETE FROM idempotency WHERE key=?",
+        ("changed-after-cache-loss",),
+    )
+    service.close()
+
+    reopened = _service(tmp_path, "changed-after-cache-loss")
+    with pytest.raises(ApiError) as caught:
+        _create(
+            reopened,
+            key="changed-after-cache-loss",
+            spec=changed_spec,
+        )
+    assert caught.value.code == "IDEMPOTENCY_CONFLICT"
+    assert reopened.get_mission(mission_id)["envelope"]["mission_id"] == mission_id
+    assert reopened.list_missions()["count"] == 1
+    reopened.close()
+
+
+def test_32_execution_authority_requires_queued_state(tmp_path):
+    service = _service(tmp_path, "dispatch-state")
+    created = _create(service)
+    mission_id = created["envelope"]["mission_id"]
+    queued_version = created["envelope"]["version"]
+    paused = service.pause(
+        mission_id,
+        idempotency_key="pause-after-authority",
+        expected_version=queued_version,
+    )
+    authority = paused["envelope"]["authority"]
+    assert paused["envelope"]["state"] == "PAUSED"
+    assert authority["state"] == "EXECUTION_APPROVED_NOT_DISPATCHABLE"
+    assert authority["work_spec_execution_authorized"] is False
+    assert authority["execution_authorized"] is False
+    assert authority["dispatch_approval_id"] is None
+    service.close()
+
+
+def test_33_tampered_consumed_approval_cannot_project_execution_authority(tmp_path):
+    service = _service(tmp_path, "tampered-approval")
+    created = _create(service)
+    mission_id = created["envelope"]["mission_id"]
+    approval = service.runtime.store.list_approvals(mission_id)[-1]
+    row = service.runtime.store._c().execute(
+        "SELECT body_json FROM approvals WHERE approval_id=?",
+        (approval.approval_id,),
+    ).fetchone()
+    body = json.loads(row["body_json"])
+    body["conditions"].append("tampered-after-consumption")
+    service.runtime.store._c().execute(
+        "UPDATE approvals SET body_json=? WHERE approval_id=?",
+        (json.dumps(body, sort_keys=True), approval.approval_id),
+    )
+
+    authority = service.get_mission(mission_id)["envelope"]["authority"]
+    assert authority["state"] == "PENDING"
+    assert authority["execution_authorized"] is False
+    assert authority["work_spec_execution_authorized"] is False
+    assert authority["dispatch_approval_id"] is None
+    service.close()

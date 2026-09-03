@@ -43,7 +43,7 @@ class Approval:
     enhanced: bool = False
     consumed_by: str | None = None
 
-    def compute_hash(self) -> str:
+    def expected_hash(self) -> str:
         body = {
             "schema_version": self.schema_version,
             "approval_id": self.approval_id,
@@ -60,7 +60,10 @@ class Approval:
             "enhanced": self.enhanced,
             "idempotency_key": self.idempotency_key,
         }
-        self.approval_hash = hash_payload(body)
+        return hash_payload(body)
+
+    def compute_hash(self) -> str:
+        self.approval_hash = self.expected_hash()
         return self.approval_hash
 
     def to_dict(self) -> dict[str, Any]:

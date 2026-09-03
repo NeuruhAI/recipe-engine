@@ -24,11 +24,11 @@ def test_approved_after_allow(service):
                                expected_version=res["envelope"]["version"])
     assert out["authority_state"] == "allow"
     env = out["envelope"]
-    assert env["authority"]["state"] == "APPROVED"
+    assert env["authority"]["state"] == "PLAN_APPROVED_NO_EXECUTION"
     assert env["authority"]["executed"] is False
     assert env["authority"]["execution_enabled"] is False
     got = service.get_mission(mid)
-    assert got["envelope"]["authority"]["state"] == "APPROVED"
+    assert got["envelope"]["authority"]["state"] == "PLAN_APPROVED_NO_EXECUTION"
 
 
 def test_rejected_after_deny(service):

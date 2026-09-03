@@ -184,20 +184,24 @@ class MissionService:
         state = mission.current_state.value
         approvals = self.runtime.store.list_approvals(mission.mission_id)
         latest_approval = approvals[-1].to_dict() if approvals else None
+        dispatch_approval = self._dispatch_approval(mission, approvals)
         authority_state = self._authority_state(mission, approvals)
+        execution_authorized = bool(
+            mission.work_spec_sha256
+            and mission.current_state == MissionState.QUEUED
+            and dispatch_approval is not None
+        )
         authority = {
             "requirements": [a.to_dict() for a in mission.authority_requirements],
             "latest_approval": latest_approval,
             "state": authority_state,
             "work_spec_sha256": mission.work_spec_sha256,
-            "work_spec_authorized": bool(
-                mission.work_spec_sha256
-                and authority_state == "APPROVED"
-                and any(
-                    approval.decision in (ApprovalDecision.ALLOW, ApprovalDecision.CONSUMED)
-                    and resolver.bound_work_spec_sha256(approval) == mission.work_spec_sha256
-                    for approval in approvals
-                )
+            # Compatibility field retained with the now-strict semantics.
+            "work_spec_authorized": execution_authorized,
+            "work_spec_execution_authorized": execution_authorized,
+            "execution_authorized": execution_authorized,
+            "dispatch_approval_id": (
+                dispatch_approval.approval_id if execution_authorized else None
             ),
             "mutation_authorized": False,
             "external_action_authorized": False,
@@ -254,8 +258,30 @@ class MissionService:
         return expected_version
 
     @staticmethod
-    def _authority_state(mission: Mission, approvals: list) -> str:
-        """Explicit authority truth: PENDING until a terminal ALLOW/DENY exists.
+    def _dispatch_approval(mission: Mission, approvals: list[Approval]) -> Approval | None:
+        action, scope = gated_action_for(
+            MissionState.AWAITING_APPROVAL,
+            MissionState.QUEUED,
+        )
+        for approval in reversed(approvals):
+            if approval.decision != ApprovalDecision.CONSUMED:
+                continue
+            recorded_hash = approval.approval_hash
+            if not recorded_hash or approval.expected_hash() != recorded_hash:
+                continue
+            if approval.exact_requested_action != action or approval.scope != scope:
+                continue
+            if (
+                mission.work_spec_sha256 is not None
+                and resolver.bound_work_spec_sha256(approval) != mission.work_spec_sha256
+            ):
+                continue
+            return approval
+        return None
+
+    @classmethod
+    def _authority_state(cls, mission: Mission, approvals: list[Approval]) -> str:
+        """Expose dispatch authority only after the exact gate was consumed.
 
         The mission's own state has the last word. A mission Governance blocked
         on policy is not approved, whatever approval history it carries — an
@@ -264,18 +290,19 @@ class MissionService:
         """
         if mission.current_state == MissionState.BLOCKED_POLICY:
             return "BLOCKED"
-        for a in reversed(approvals):
-            if a.decision in (ApprovalDecision.ALLOW, ApprovalDecision.CONSUMED):
-                if (
-                    mission.work_spec_sha256 is not None
-                    and resolver.bound_work_spec_sha256(a) != mission.work_spec_sha256
-                ):
-                    continue
-                # A consumed approval was an ALLOW that the kernel spent on the
-                # gated transition; the authority truth is still APPROVED.
+        if cls._dispatch_approval(mission, approvals) is not None:
+            if mission.current_state == MissionState.QUEUED:
                 return "APPROVED"
+            return "EXECUTION_APPROVED_NOT_DISPATCHABLE"
+        for a in reversed(approvals):
             if a.decision == ApprovalDecision.DENY:
                 return "REJECTED"
+            if (
+                a.decision == ApprovalDecision.ALLOW
+                and a.exact_requested_action.startswith("plan_decision:")
+                and mission.current_state == MissionState.APPROVED_NO_EXECUTION
+            ):
+                return "PLAN_APPROVED_NO_EXECUTION"
         return "PENDING"
 
     def _assert_not_corrupted(self, mission_id: str) -> None:
@@ -446,6 +473,47 @@ class MissionService:
         with self._lock:
             return self._replay_impl(mission_id)
 
+    def _reconstruct_creation_response(self, mission: Mission) -> dict[str, Any]:
+        if mission.extensions.get("initial_block") == "BLOCKED_INPUT":
+            body = self._envelope(self._get(mission.mission_id))
+            body["blocked_question"] = mission.extensions.get("blocked_question")
+            return {
+                "envelope": body,
+                "decision_packet": None,
+                "proposed_plan": None,
+                "idempotent_replay": True,
+            }
+
+        packet = None
+        plan = None
+        plan_id = None
+        for event in self.runtime.store.list_events(mission.mission_id):
+            if event.event_type != EventType.OUTCOME_RECORDED:
+                continue
+            if "packet" in event.payload:
+                packet = event.payload.get("packet")
+                plan = event.payload.get("plan")
+                plan_id = event.payload.get("plan_id")
+        if packet is None:
+            raise ApiError(
+                409,
+                "IDEMPOTENCY_RECOVERY_INCOMPLETE",
+                "mission creation exists but its decision packet is not committed",
+                {"mission_id": mission.mission_id},
+            )
+        body = self._envelope(
+            self._get(mission.mission_id),
+            evidence_refs=[packet.get("packet_id") or ""],
+        )
+        return {
+            "envelope": body,
+            "decision_packet": packet,
+            "proposed_plan": plan,
+            "plan_id": plan_id,
+            "authority_resolution": None,
+            "idempotent_replay": True,
+        }
+
     # ---- public operations ----
     def create_mission(self, *, objective: str, title: str = "", done_criteria: str = "",
                        work_spec: Mapping[str, Any] | None = None,
@@ -469,15 +537,26 @@ class MissionService:
             cached["idempotent_replay"] = True
             return cached
         with self._lock:
+            existing = self.runtime.store.get_mission_by_creation_key(idempotency_key)
             request_text = objective if not done_criteria else f"{objective}\nDone when: {done_criteria}"
-            mission = self.runtime.create_mission_from_text(
-                request_text,
-                creation_idempotency_key=idempotency_key,
-                work_spec=normalized_work_spec,
-            )
+            try:
+                mission = self.runtime.create_mission_from_text(
+                    request_text,
+                    creation_idempotency_key=idempotency_key,
+                    work_spec=normalized_work_spec,
+                )
+            except PersistenceConflict as exc:
+                raise ApiError(
+                    409,
+                    "IDEMPOTENCY_CONFLICT",
+                    "mission creation idempotency key was reused for different material",
+                    {"key": idempotency_key},
+                ) from exc
             mid = mission.mission_id
             result: dict[str, Any]
-            if mission.extensions.get("initial_block") == "BLOCKED_INPUT":
+            if existing is not None:
+                result = self._reconstruct_creation_response(mission)
+            elif mission.extensions.get("initial_block") == "BLOCKED_INPUT":
                 body = self._envelope(self._get(mid))
                 body["blocked_question"] = mission.extensions.get("blocked_question")
                 result = {"envelope": body, "decision_packet": None, "proposed_plan": None}

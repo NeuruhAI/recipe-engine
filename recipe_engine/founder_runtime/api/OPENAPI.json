@@ -1,6 +1,105 @@
 {
   "components": {
     "schemas": {
+      "AuthorityEnvelopeBody": {
+        "properties": {
+          "dispatch_approval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Approval Id"
+          },
+          "executed": {
+            "title": "Executed",
+            "type": "boolean"
+          },
+          "execution_authorized": {
+            "title": "Execution Authorized",
+            "type": "boolean"
+          },
+          "execution_enabled": {
+            "title": "Execution Enabled",
+            "type": "boolean"
+          },
+          "external_action_authorized": {
+            "title": "External Action Authorized",
+            "type": "boolean"
+          },
+          "latest_approval": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Approval"
+          },
+          "mutation_authorized": {
+            "title": "Mutation Authorized",
+            "type": "boolean"
+          },
+          "production_persistence_authorized": {
+            "title": "Production Persistence Authorized",
+            "type": "boolean"
+          },
+          "requirements": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "work_spec_authorized": {
+            "title": "Work Spec Authorized",
+            "type": "boolean"
+          },
+          "work_spec_execution_authorized": {
+            "title": "Work Spec Execution Authorized",
+            "type": "boolean"
+          },
+          "work_spec_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Spec Sha256"
+          }
+        },
+        "required": [
+          "requirements",
+          "latest_approval",
+          "state",
+          "work_spec_sha256",
+          "work_spec_authorized",
+          "work_spec_execution_authorized",
+          "execution_authorized",
+          "dispatch_approval_id",
+          "mutation_authorized",
+          "external_action_authorized",
+          "production_persistence_authorized",
+          "executed",
+          "execution_enabled"
+        ],
+        "title": "AuthorityEnvelopeBody",
+        "type": "object"
+      },
       "CreateMissionBody": {
         "properties": {
           "done_criteria": {
@@ -50,6 +149,24 @@
         "title": "DecisionBody",
         "type": "object"
       },
+      "FreshnessBody": {
+        "properties": {
+          "observed_at": {
+            "title": "Observed At",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at",
+          "stale"
+        ],
+        "title": "FreshnessBody",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -61,6 +178,143 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MissionDetailResponse": {
+        "properties": {
+          "envelope": {
+            "$ref": "#/components/schemas/MissionEnvelopeBody"
+          },
+          "mission": {
+            "additionalProperties": true,
+            "title": "Mission",
+            "type": "object"
+          }
+        },
+        "required": [
+          "envelope",
+          "mission"
+        ],
+        "title": "MissionDetailResponse",
+        "type": "object"
+      },
+      "MissionEnvelopeBody": {
+        "properties": {
+          "allowed_next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Next Actions",
+            "type": "array"
+          },
+          "api_version": {
+            "title": "Api Version",
+            "type": "string"
+          },
+          "authority": {
+            "$ref": "#/components/schemas/AuthorityEnvelopeBody"
+          },
+          "blocked_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Actions",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/FreshnessBody"
+          },
+          "mission_id": {
+            "title": "Mission Id",
+            "type": "string"
+          },
+          "objective": {
+            "title": "Objective",
+            "type": "string"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "runtime_version": {
+            "title": "Runtime Version",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "work_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSpecEnvelopeBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "work_spec_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Spec Sha256"
+          }
+        },
+        "required": [
+          "api_version",
+          "runtime_version",
+          "mission_id",
+          "state",
+          "version",
+          "objective",
+          "work_spec",
+          "work_spec_sha256",
+          "evidence_refs",
+          "authority",
+          "allowed_next_actions",
+          "blocked_actions",
+          "freshness",
+          "receipt_id"
+        ],
+        "title": "MissionEnvelopeBody",
+        "type": "object"
+      },
+      "MissionListResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "missions": {
+            "items": {
+              "$ref": "#/components/schemas/MissionEnvelopeBody"
+            },
+            "title": "Missions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "missions"
+        ],
+        "title": "MissionListResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -179,6 +433,88 @@
         ],
         "title": "WorkSpecBody",
         "type": "object"
+      },
+      "WorkSpecEnvelopeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "code_custody_required": {
+            "title": "Code Custody Required",
+            "type": "boolean"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "external_message": {
+            "title": "External Message",
+            "type": "boolean"
+          },
+          "intelligence_layer": {
+            "enum": [
+              "L0_DETERMINISTIC",
+              "L1_NEURUH_DETERMINISTIC",
+              "L2_LOCAL_MODEL",
+              "L3_CHEAP_REMOTE_MODEL",
+              "L4_FRONTIER_MODEL"
+            ],
+            "title": "Intelligence Layer",
+            "type": "string"
+          },
+          "irreversible": {
+            "title": "Irreversible",
+            "type": "boolean"
+          },
+          "money_move": {
+            "title": "Money Move",
+            "type": "boolean"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "private_ip_risk": {
+            "title": "Private Ip Risk",
+            "type": "boolean"
+          },
+          "production_mutation": {
+            "title": "Production Mutation",
+            "type": "boolean"
+          },
+          "schema": {
+            "const": "fr.work_spec.v1",
+            "title": "Schema",
+            "type": "string"
+          },
+          "workflow_name": {
+            "minLength": 1,
+            "title": "Workflow Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "workflow_name",
+          "params",
+          "intelligence_layer",
+          "evidence_refs",
+          "production_mutation",
+          "external_message",
+          "money_move",
+          "irreversible",
+          "private_ip_risk",
+          "code_custody_required",
+          "candidate_id"
+        ],
+        "title": "WorkSpecEnvelopeBody",
+        "type": "object"
       }
     }
   },
@@ -273,7 +609,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MissionListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -394,7 +732,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MissionDetailResponse"
+                }
               }
             },
             "description": "Successful Response"

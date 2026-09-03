@@ -137,7 +137,10 @@ class SqliteStore:
                 ).fetchone()
                 if existing:
                     existing_mission = Mission.from_dict(json.loads(existing["body_json"]))
-                    if existing_mission.input_hash != mission.input_hash:
+                    # Recompute using current request-only identity semantics so
+                    # missions written before candidate_id was excluded remain
+                    # retryable after an upgrade.
+                    if existing_mission.request_input_hash() != mission.input_hash:
                         c.execute("ROLLBACK")
                         raise PersistenceConflict(
                             "mission creation idempotency key reused for different mission material",
@@ -214,6 +217,15 @@ class SqliteStore:
 
     def get_mission(self, mission_id: str) -> Mission | None:
         row = self._c().execute("SELECT body_json FROM missions WHERE mission_id=?", (mission_id,)).fetchone()
+        if not row:
+            return None
+        return Mission.from_dict(json.loads(row["body_json"]))
+
+    def get_mission_by_creation_key(self, creation_idempotency_key: str) -> Mission | None:
+        row = self._c().execute(
+            "SELECT body_json FROM missions WHERE creation_idempotency_key=?",
+            (creation_idempotency_key,),
+        ).fetchone()
         if not row:
             return None
         return Mission.from_dict(json.loads(row["body_json"]))

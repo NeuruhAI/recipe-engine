@@ -48,6 +48,58 @@ class WorkSpecBody(BaseModel):
     code_custody_required: bool
 
 
+class WorkSpecEnvelopeBody(WorkSpecBody):
+    candidate_id: str
+
+
+class AuthorityEnvelopeBody(BaseModel):
+    requirements: list[dict[str, Any]]
+    latest_approval: dict[str, Any] | None
+    state: str
+    work_spec_sha256: str | None
+    work_spec_authorized: bool
+    work_spec_execution_authorized: bool
+    execution_authorized: bool
+    dispatch_approval_id: str | None
+    mutation_authorized: bool
+    external_action_authorized: bool
+    production_persistence_authorized: bool
+    executed: bool
+    execution_enabled: bool
+
+
+class FreshnessBody(BaseModel):
+    observed_at: str
+    stale: bool
+
+
+class MissionEnvelopeBody(BaseModel):
+    api_version: str
+    runtime_version: str
+    mission_id: str
+    state: str
+    version: int
+    objective: str
+    work_spec: WorkSpecEnvelopeBody | None
+    work_spec_sha256: str | None
+    evidence_refs: list[str]
+    authority: AuthorityEnvelopeBody
+    allowed_next_actions: list[str]
+    blocked_actions: list[str]
+    freshness: FreshnessBody
+    receipt_id: str
+
+
+class MissionListResponse(BaseModel):
+    count: int
+    missions: list[MissionEnvelopeBody]
+
+
+class MissionDetailResponse(BaseModel):
+    envelope: MissionEnvelopeBody
+    mission: dict[str, Any]
+
+
 class CreateMissionBody(BaseModel):
     objective: str = Field(min_length=1, max_length=8000)
     title: str = Field(default="", max_length=500)
@@ -142,11 +194,19 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
             work_spec=body.work_spec.model_dump(by_alias=True) if body.work_spec is not None else None,
             idempotency_key=key)
 
-    @app.get("/v1/missions", dependencies=[Depends(require_auth)])
+    @app.get(
+        "/v1/missions",
+        dependencies=[Depends(require_auth)],
+        response_model=MissionListResponse,
+    )
     async def list_missions():
         return service.list_missions()
 
-    @app.get("/v1/missions/{mission_id}", dependencies=[Depends(require_auth)])
+    @app.get(
+        "/v1/missions/{mission_id}",
+        dependencies=[Depends(require_auth)],
+        response_model=MissionDetailResponse,
+    )
     async def get_mission(mission_id: str):
         return service.get_mission(mission_id)
 

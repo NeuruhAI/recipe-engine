@@ -218,7 +218,7 @@ class Mission:
             body["work_spec_sha256"] = self.work_spec_sha256
         return body
 
-    def recompute_input_hash(self) -> str:
+    def request_input_hash(self) -> str:
         payload = {
             "principal": self.principal.to_dict(),
             "title": self.title,
@@ -239,9 +239,15 @@ class Mission:
             "approval_gates": list(self.approval_gates),
         }
         if self.work_spec is not None:
-            payload["work_spec"] = self.work_spec.to_dict()
-            payload["work_spec_sha256"] = self.work_spec_sha256
-        self.input_hash = hash_payload(payload)
+            # candidate_id and work_spec_sha256 are derived from the newly
+            # allocated mission id. Creation idempotency compares caller
+            # material, so including either would make an exact retry compile
+            # to a different input hash after API-cache loss.
+            payload["work_spec"] = self.work_spec.request_dict()
+        return hash_payload(payload)
+
+    def recompute_input_hash(self) -> str:
+        self.input_hash = self.request_input_hash()
         return self.input_hash
 
     @staticmethod
