@@ -152,6 +152,22 @@ class FounderRuntimeClient:
                          idempotency_key=idempotency_key or self._key(),
                          expected_version=expected_version)
 
+    # R02D: the workers dispatch bridge reports a sealed execution outcome.
+    # ``body`` is a complete fr.execution_outcome.v1 envelope; the runtime binds
+    # and orders it. Default idempotency key = the evidence identity, so a
+    # retried report of the same outcome is a replay by construction.
+    def record_execution_outcome(self, mission_id: str, body: Mapping[str, Any], *,
+                                 idempotency_key: str | None = None,
+                                 expected_version: int | None = None) -> dict:
+        if idempotency_key is None:
+            receipt = body.get("receipt") or {}
+            court = body.get("court") or {}
+            idempotency_key = ":".join(str(part) for part in (
+                "execution_outcome", body.get("execution_id"), body.get("outcome"),
+                receipt.get("receipt_sha") or court.get("record_sha") or ""))
+        return self._req("POST", f"/v1/missions/{mission_id}/execution-outcomes", body=dict(body),
+                         idempotency_key=idempotency_key, expected_version=expected_version)
+
     def stream_events(self, mission_id: str, *, after: int | str | None = None,
                       last_event_id: str | None = None) -> Iterator[dict]:
         """Yield parsed SSE events from the read-only stream endpoint.

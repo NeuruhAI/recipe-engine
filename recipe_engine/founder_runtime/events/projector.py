@@ -134,6 +134,18 @@ def apply_event(mission: Mission | None, event: MissionEvent) -> Mission:
                 refs.append(ref)
         ext[key] = refs
         m.extensions = ext
+    elif et == EventType.EXECUTION_OUTCOME_RECORDED:
+        from recipe_engine.founder_runtime.evidence.execution_outcome import (
+            EXECUTION_PROJECTION_KEY, apply_outcome_to_projection,
+        )
+        envelope = (event.payload or {}).get("execution_outcome")
+        if not isinstance(envelope, dict):
+            raise MissionSchemaInvalid("execution_outcome_recorded requires payload.execution_outcome", {})
+        ext = dict(m.extensions or {})
+        ext[EXECUTION_PROJECTION_KEY] = apply_outcome_to_projection(
+            ext.get(EXECUTION_PROJECTION_KEY), envelope, event_id=event.event_id,
+        )
+        m.extensions = ext
     elif et == EventType.COMPLETION_RECORDED:
         report = (event.payload or {}).get("completion_report") or {}
         if not report.get("completion_hash"):

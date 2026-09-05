@@ -42,6 +42,11 @@ class EventType(str, Enum):
     SUPERSEDED = "superseded"
     CANCELLED = "cancelled"
     FAILURE_RECORDED = "failure_recorded"
+    # R02D: the Founder Runtime learning a Workers execution outcome from
+    # sealed evidence (fr.execution_outcome.v1). It moves state along the
+    # execution path (QUEUED->EXECUTING->VERIFYING/FAILED_RETRYABLE->RECONCILING)
+    # and is also a legal same-state audit event (EXECUTING while EXECUTING).
+    EXECUTION_OUTCOME_RECORDED = "execution_outcome_recorded"
 
 
 SAME_STATE_EVENT_TYPES: frozenset[EventType] = frozenset({
@@ -61,6 +66,7 @@ SAME_STATE_EVENT_TYPES: frozenset[EventType] = frozenset({
     EventType.SIDE_EFFECT_MARKED,
     EventType.SIDE_EFFECT_RECONCILED,
     EventType.EXCEPTION_DISCLOSED,
+    EventType.EXECUTION_OUTCOME_RECORDED,
 })
 
 
