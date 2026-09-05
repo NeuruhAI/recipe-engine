@@ -1,0 +1,14 @@
+# gitleaks configuration for NeuruhAI/recipe-engine.
+# The Founder Runtime test fixtures carry live, immutable evidence copied
+# verbatim from ~/.neuruh ledgers (e.g. the Mission B nrh.receipt.fr-dispatch.v1
+# receipt). Their IDEMPOTENCY_KEY / *_SHA fields are sha256 content digests, not
+# credentials; the receipt bytes must stay verbatim so the PAYLOAD_HASH golden
+# test keeps binding to the live file. Nothing under this path is a secret.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Founder Runtime golden evidence fixtures (content digests, not credentials)"
+paths = [
+  '''tests/founder_runtime/fixtures/.*''',
+]
