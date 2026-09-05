@@ -5,7 +5,9 @@ State-changing routes require an Idempotency-Key header AND an X-Expected-Versio
 header (mandatory optimistic concurrency; exactly one terminal authority decision
 per mission/plan/scope). The SSE stream supports durable cursor resume via
 Last-Event-ID or an explicit ?after= cursor. No route executes a plan, mutates
-AXON, dispatches Workers, fetches a URL, or touches production.
+AXON, dispatches Workers, fetches a URL, or touches production. The execution-outcomes
+route only LEARNS, from sealed evidence, what a dispatch the runtime already
+authorised did (R02D).
 """
 
 from __future__ import annotations
@@ -327,6 +329,25 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
     @app.get("/v1/missions/{mission_id}/receipts", dependencies=[Depends(require_auth)])
     async def receipts(mission_id: str):
         return service.receipts(mission_id)
+
+    # ---- R02D: execution-outcome write-back (G-03) ------------------------
+    # The ONE route through which the Founder Runtime learns that a dispatched
+    # execution progressed, finished, or was judged. The caller (the workers
+    # dispatch bridge, a separate writer) sends sealed evidence, never a state:
+    # the kernel recomputes the receipt hash the emitter's way, binds mission /
+    # work spec / consumed approval / dispatched version / execution id, orders
+    # the outcome against what it already learned, and moves state only along
+    # the execution path. It never reaches COMPLETED. The body is validated by
+    # the kernel against the exact fr.execution_outcome.v1 shape so refusals
+    # carry the runtime's own codes rather than a transport 422.
+    @app.post("/v1/missions/{mission_id}/execution-outcomes", dependencies=[Depends(require_auth)])
+    async def record_execution_outcome(mission_id: str, body: dict[str, Any],
+                                       idempotency_key: str | None = Header(default=None),
+                                       x_expected_version: int | None = Header(default=None)):
+        key = _idem_key(idempotency_key)
+        return await run_in_threadpool(
+            service.record_execution_outcome, mission_id, body=body,
+            idempotency_key=key, expected_version=x_expected_version)
 
     @app.get("/v1/missions/{mission_id}/replay", dependencies=[Depends(require_auth)])
     async def replay(mission_id: str):

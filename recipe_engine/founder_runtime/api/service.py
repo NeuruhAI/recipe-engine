@@ -39,7 +39,8 @@ from recipe_engine.founder_runtime.contracts.events import EventType
 from recipe_engine.founder_runtime.contracts.mission import Mission
 from recipe_engine.founder_runtime.contracts.work_spec import validate_work_spec_request
 from recipe_engine.founder_runtime.errors import (
-    ApprovalRequired, AuthorityDenied, FounderRuntimeError, MissionNotFound,
+    ApprovalRequired, AuthorityDenied, ExecutionOutcomeMalformed, ExecutionOutcomeRejected,
+    FounderRuntimeError, MissionNotFound,
     MissionSchemaInvalid, PersistenceConflict, StateTransitionInvalid,
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
@@ -1238,7 +1239,68 @@ class MissionService:
         approvals = [a.to_dict() for a in self.runtime.store.list_approvals(mission_id)]
         checkpoints = [c.to_dict() for c in self.runtime.store.list_checkpoints(mission_id)]
         return {"envelope": self._envelope(mission), "receipts": receipts,
-                "approvals": approvals, "checkpoints": checkpoints}
+                "approvals": approvals, "checkpoints": checkpoints,
+                # R02D: the sealed dispatch receipt / court records the runtime learned
+                # from (fr.execution_outcome.v1). Distinct from fr.receipt.v1 step
+                # receipts, which remain the completion verifier's evidence class.
+                "execution": self.runtime.execution_projection(mission_id),
+                "execution_outcomes": self.runtime.execution_outcomes(mission_id)}
+
+    # ---- R02D: execution-outcome write-back (G-03) ----------------------------
+    def record_execution_outcome(self, mission_id: str, *, body: Mapping[str, Any],
+                                 idempotency_key: str, expected_version: int | None = None) -> dict[str, Any]:
+        """Learn a Workers execution outcome from sealed evidence.
+
+        Idempotent twice over: the Idempotency-Key ledger returns the stored
+        response for an exact replay (and refuses the key over a different body),
+        and the kernel itself treats already-learned evidence as a replay, so a
+        restarted sender with a fresh key still applies nothing twice.
+        X-Expected-Version is optional here: the envelope binds to the DISPATCHED
+        mission version inside the evidence, which is the stronger claim, and the
+        kernel's own CAS still guards the append.
+        """
+        with self._lock:
+            mission = self._get(mission_id)
+            self._assert_not_corrupted(mission_id)
+            if not isinstance(body, Mapping):
+                raise ApiError(400, "EXECUTION_OUTCOME_MALFORMED", "execution outcome body must be an object", {})
+            try:
+                request_hash = hash_payload({"route": "execution_outcome", "mission_id": mission_id,
+                                             "body": dict(body)})
+            except TypeError as exc:
+                raise ApiError(400, "EXECUTION_OUTCOME_MALFORMED",
+                               "execution outcome body is not canonical JSON", {"cause": str(exc)[:200]}) from exc
+            cached = self._idem_lookup(idempotency_key, request_hash)
+            if cached is not None:
+                # An exact replay applies nothing NOW; the first response already
+                # said what it appended. Report the replay honestly.
+                cached["idempotent_replay"] = True
+                cached["applied"] = False
+                cached["events_appended"] = []
+                return cached
+            if expected_version is not None:
+                self._assert_version(mission, expected_version)
+            try:
+                result = self.runtime.record_execution_outcome(mission_id, body)
+            except ExecutionOutcomeMalformed as e:
+                raise ApiError(400, "EXECUTION_OUTCOME_MALFORMED", e.message, dict(e.details)) from e
+            except ExecutionOutcomeRejected as e:
+                raise ApiError(409, e.reason_code, e.message, dict(e.details)) from e
+            except MissionNotFound as e:
+                raise ApiError(404, "MISSION_NOT_FOUND", "mission not found", {"mission_id": mission_id}) from e
+            except StateTransitionInvalid as e:
+                raise ApiError(409, "STATE_TRANSITION_INVALID", str(e), dict(e.details)) from e
+            except PersistenceConflict as e:
+                raise ApiError(409, "PERSISTENCE_CONFLICT", str(e), dict(e.details)) from e
+            response = {
+                "envelope": self._envelope(self._get(mission_id)),
+                **result,
+                "verified": False,
+                "note": ("execution outcome recorded from sealed evidence; the mission is NOT verified or "
+                         "completed by an execution or court outcome"),
+            }
+            self._idem_store(idempotency_key, request_hash, response)
+            return response
 
     def _recover_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)

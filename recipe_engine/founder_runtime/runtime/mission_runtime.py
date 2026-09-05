@@ -35,6 +35,9 @@ from recipe_engine.founder_runtime.runtime.approvals import (
     is_approval_gated, validate_approval_record, assert_approval_usable, gated_action_for,
 )
 from recipe_engine.founder_runtime.runtime.approval_resolver import bound_work_spec_sha256
+from recipe_engine.founder_runtime.evidence.execution_outcome import (
+    EXECUTION_PROJECTION_KEY, bind_to_mission, validate_execution_outcome,
+)
 from recipe_engine.founder_runtime.observability.logging import RuntimeLog
 from recipe_engine.founder_runtime.observability.metrics import Metrics
 
@@ -719,6 +722,124 @@ class MissionRuntime:
         )
         return outcome
 
+    # ---- R02D: execution-outcome write-back (G-03) ---------------------------
+    # The Founder Runtime never learned that a dispatched execution finished:
+    # Mission B sat QUEUED (v15) after a SUCCEEDED, sealed receipt, and the SOPS
+    # cursor was the only thing preventing a second dispatch. The runtime now
+    # LEARNS the outcome from evidence: the sealed dispatch receipt (hash
+    # recomputed the emitter's way) or an independent court record, bound to
+    # this mission, its work specification, its consumed dispatch approval, the
+    # dispatched version and one execution id. It moves state only along the
+    # execution path and never to COMPLETED: execution completing is not
+    # verification, and a court passing is not completion.
+
+    def consumed_dispatch_approval(self, mission: Mission) -> Approval | None:
+        """The consumed approval that authorised dispatching this exact work spec, or None."""
+        action, scope = gated_action_for(MissionState.AWAITING_APPROVAL, MissionState.QUEUED)
+        for approval in reversed(self.store.list_approvals(mission.mission_id)):
+            if approval.decision != ApprovalDecision.CONSUMED:
+                continue
+            if not approval.approval_hash or approval.expected_hash() != approval.approval_hash:
+                continue
+            if approval.exact_requested_action != action or approval.scope != scope:
+                continue
+            if mission.work_spec_sha256 is not None and bound_work_spec_sha256(approval) != mission.work_spec_sha256:
+                continue
+            return approval
+        return None
+
+    def execution_projection(self, mission_id: str) -> dict[str, Any] | None:
+        mission = self.get_mission(mission_id)
+        found = (mission.extensions or {}).get(EXECUTION_PROJECTION_KEY)
+        return dict(found) if isinstance(found, dict) else None
+
+    def execution_outcomes(self, mission_id: str) -> list[dict[str, Any]]:
+        """Every accepted execution-outcome event, in chain order, with its evidence."""
+        out: list[dict[str, Any]] = []
+        for event in self.store.list_events(mission_id):
+            if event.event_type != EventType.EXECUTION_OUTCOME_RECORDED:
+                continue
+            envelope = dict((event.payload or {}).get("execution_outcome") or {})
+            out.append({
+                "event_id": event.event_id,
+                "sequence": event.sequence,
+                "chain_position": event.chain_position,
+                "prior_state": None if event.prior_state is None else event.prior_state.value,
+                "next_state": event.next_state.value,
+                "outcome": envelope.get("outcome"),
+                "implied": bool(envelope.get("implied", False)),
+                "execution_outcome": envelope,
+                "evidence_refs": list(event.evidence_refs),
+                "timestamp": event.timestamp,
+            })
+        return out
+
+    def record_execution_outcome(self, mission_id: str, body: Mapping[str, Any], *,
+                                 actor: str = "dispatch_bridge") -> dict[str, Any]:
+        """Learn one execution outcome from evidence. Raises
+        ExecutionOutcomeMalformed / ExecutionOutcomeRejected / MissionNotFound."""
+        outcome = validate_execution_outcome(body)
+        mission = self.get_mission(mission_id)
+        approval = self.consumed_dispatch_approval(mission)
+        decision = bind_to_mission(
+            outcome,
+            mission_id=mission_id,
+            mission_state=mission.current_state,
+            mission_version=mission.version,
+            work_spec_sha256=mission.work_spec_sha256,
+            dispatch_approval_id=None if approval is None else approval.approval_id,
+            projection=(mission.extensions or {}).get(EXECUTION_PROJECTION_KEY),
+        )
+        state_before = mission.current_state.value
+        if decision.replay:
+            self.metrics.inc("execution_outcome_replays")
+            return {
+                "applied": False,
+                "idempotent_replay": True,
+                "events_appended": [],
+                "state_before": state_before,
+                "state_after": state_before,
+                "execution": self.execution_projection(mission_id),
+            }
+        appended: list[str] = []
+        causation: str | None = None
+        for step in decision.steps:
+            mission = self.get_mission(mission_id)
+            ev = self._event(
+                mission,
+                prior=mission.current_state,
+                next_state=step.next_state,
+                etype=EventType.EXECUTION_OUTCOME_RECORDED,
+                reason=step.reason,
+                actor=actor,
+                idem=step.idempotency_key,
+                payload={"execution_outcome": dict(step.envelope)},
+                evidence_refs=list(step.evidence_refs),
+            )
+            ev.causation_id = causation
+            StateMachine.assert_transition(mission.current_state, step.next_state, event=ev, require_event=True)
+            self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+            appended.append(ev.event_id)
+            causation = ev.event_id
+        updated = self.get_mission(mission_id)
+        self.metrics.inc("execution_outcomes_recorded")
+        self.log.emit(
+            event_type="execution_outcome_recorded",
+            mission_id=mission_id,
+            state=updated.current_state.value,
+            result="ok",
+            extra={"outcome": outcome["outcome"], "execution_id": outcome["execution_id"],
+                   "prior": state_before, "next": updated.current_state.value},
+        )
+        return {
+            "applied": True,
+            "idempotent_replay": False,
+            "events_appended": appended,
+            "state_before": state_before,
+            "state_after": updated.current_state.value,
+            "execution": self.execution_projection(mission_id),
+        }
+
     AUTHORIZATION_REQUEST_KEY = "authorization_request"
 
     def record_authorization_request(self, mission_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -775,6 +896,7 @@ class MissionRuntime:
             "artifacts": self.store.list_artifacts(mission_id),
             "completion": None if not self.store.get_completion(mission_id) else self.store.get_completion(mission_id).to_dict(),
             "side_effects": self.store.list_side_effects(mission_id),
+            "execution_outcomes": self.execution_outcomes(mission_id),
         }
 
     def events(self, mission_id: str) -> list[dict[str, Any]]:
