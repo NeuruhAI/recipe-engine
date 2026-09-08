@@ -1,0 +1,733 @@
+{
+  "all_proofs_pass": true,
+  "decisions": {
+    "long_term_absentee_potential_equity": "MATCH",
+    "open_probate_property": "UNKNOWN",
+    "published_tax_distress": "MATCH",
+    "stalled_tax_foreclosure_heirship": "NO_MATCH"
+  },
+  "fixture_id": "p1_independent_eligibility_one_property_four_recipes",
+  "intake_projections": {
+    "long_term_absentee_potential_equity": {
+      "asset_id": "parcel-37183-0123456",
+      "composition_digest": "9a79e42789129b1a2db19dd10eb778946da7620fd5ecb0990a6eee5602fdba0c",
+      "content_sha256": "c7032dc7bbe500403aa68239f75660d57cb63f0c0003615b7307aadb2cd617c5",
+      "decision": "MATCH",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890"
+      },
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "61f2cb5b4c235d42a8a92447b2fe165b9519525f2a188b588d196166705e1cb6",
+      "producer_owner": "recipe-engine",
+      "reason": "MATCH: all 3 clauses satisfied by bound evidence (absentee_present, long_hold_present, not_government_owned)",
+      "recipe_id": "long_term_absentee_potential_equity",
+      "recipe_version_id": "long_term_absentee_potential_equity@elig.1",
+      "schema_version": "neuruh.lead-recipe-os.independent-eligibility-intake.v1",
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    },
+    "open_probate_property": {
+      "asset_id": "parcel-37183-0123456",
+      "composition_digest": "683b42730b7dc1efc6ebe3978fb2106b98c9e2bf5610db37a431cf31ddfdde7e",
+      "content_sha256": "f89d86547b90e960c82ce0a5a65490d3695246ad6800fb00b06800e17a22f699",
+      "decision": "UNKNOWN",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890"
+      },
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "65dbc69cfa727f150f359ffb8cef7cbf664c6d5b7e38c5fbd51fba10872a8543",
+      "producer_owner": "recipe-engine",
+      "reason": "UNKNOWN: clause estate_present: SIGNAL_UNKNOWN unresolved",
+      "recipe_id": "open_probate_property",
+      "recipe_version_id": "open_probate_property@elig.1",
+      "schema_version": "neuruh.lead-recipe-os.independent-eligibility-intake.v1",
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    },
+    "published_tax_distress": {
+      "asset_id": "parcel-37183-0123456",
+      "composition_digest": "8b6c75b155583d278876667f11e7ec4b38bf7a98cfa19062b31bc9b44835e078",
+      "content_sha256": "224fc06350559a5afcf1c5f6f50cbec20cce2bb6ba43f14111358d2aeff45088",
+      "decision": "MATCH",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890",
+        "ev-tax-roll-2026": "dc1e7d30b6630b8bd18a0cef1d34130ecf4f812d5a3a80f60f5a7f12bf2594c9"
+      },
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "f791facb6c06a6c316c187f4381e2f3d802a4f05bf044e2288c33ee70b5b80af",
+      "producer_owner": "recipe-engine",
+      "reason": "MATCH: all 2 clauses satisfied by bound evidence (not_government_owned, tax_present)",
+      "recipe_id": "published_tax_distress",
+      "recipe_version_id": "published_tax_distress@elig.1",
+      "schema_version": "neuruh.lead-recipe-os.independent-eligibility-intake.v1",
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    },
+    "stalled_tax_foreclosure_heirship": {
+      "asset_id": "parcel-37183-0123456",
+      "composition_digest": "d42c2728c0ad6ed105468ed06fbeffbd8c4a4cba7ca59101e94c69bf3197e968",
+      "content_sha256": "1b674b68c6e9dba165492f09e4b09847ff0f8eb860acb81145e4e5a39520d5b3",
+      "decision": "NO_MATCH",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-docket-search-2026": "9ec2d7cba3f2e854bd49753c14100f024305a3f27e38f50e2639c4d36a945f65",
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890"
+      },
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "6c333211c4f4fa1bf4ed7cb52ee3be1570162f143f2cf931406739f2cb057d61",
+      "producer_owner": "recipe-engine",
+      "reason": "NO_MATCH: clause foreclosure_present contradicted by bound evidence (pre_foreclosure observed ABSENT, expected PRESENT, negative evidence decisive)",
+      "recipe_id": "stalled_tax_foreclosure_heirship",
+      "recipe_version_id": "stalled_tax_foreclosure_heirship@elig.1",
+      "schema_version": "neuruh.lead-recipe-os.independent-eligibility-intake.v1",
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    }
+  },
+  "mission_id": "NEURUH-RECIPE-P1-INDEPENDENT-ELIGIBILITY-20260908",
+  "producer_version": "recipe-engine/eligibility@1.0.0",
+  "proofs": {
+    "CANDIDATE_IDENTITY_UNCHANGED": {
+      "identity": [
+        "fixture-tenant",
+        "fixture-universe-nc-wake",
+        "candidate-willow-120",
+        "parcel-37183-0123456"
+      ],
+      "pass": true
+    },
+    "IDEMPOTENT_REPLAY": {
+      "first_append": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "journal_size": 4,
+      "pass": true,
+      "replay_append": [
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    "MATCH_PROOF": {
+      "pass": true,
+      "recipes": {
+        "long_term_absentee_potential_equity": "9235c77dfb656db63940c2ef323334a74b1d67b183a3761289d673ac4b2cc715",
+        "published_tax_distress": "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d"
+      }
+    },
+    "MULTI_RECIPE_MATCH_COEXISTENCE": {
+      "live_memberships": {
+        "long_term_absentee_potential_equity": "MATCH",
+        "open_probate_property": "UNKNOWN",
+        "published_tax_distress": "UNKNOWN",
+        "stalled_tax_foreclosure_heirship": "NO_MATCH"
+      },
+      "note": "published_tax_distress is now UNKNOWN in the journal after the withdrawal supersession; long_term_absentee_potential_equity remains MATCH; the fixture receipts hold both published_tax_distress and long_term_absentee_potential_equity as MATCH",
+      "pass": true
+    },
+    "NO_CONTACT_AUTHORITY": {
+      "intake_projection_constants": "consumer sets production_write=false, contact_authorized=false",
+      "pass": true
+    },
+    "NO_CRM_PROMOTION": {
+      "leaked_fields": {
+        "long_term_absentee_potential_equity": [],
+        "open_probate_property": [],
+        "published_tax_distress": [],
+        "stalled_tax_foreclosure_heirship": []
+      },
+      "pass": true,
+      "storage_side_effects": "none (process-local journal, no I/O)"
+    },
+    "NO_MATCH_PROOF": {
+      "content_sha256": "d6a03a7365512e32c798012f9e6a457e6111f780ea669681efee2ac7d1887255",
+      "decisive_clause": "foreclosure_present",
+      "pass": true,
+      "recipe": "stalled_tax_foreclosure_heirship",
+      "unknown_clause_in_same_recipe": "estate_present"
+    },
+    "NO_RANK_OR_PRIMARY_AUTHORITY": {
+      "pass": true,
+      "refused_inputs": {
+        "component_contributions": true,
+        "contact_authorized": true,
+        "global_rank": true,
+        "primary_recipe": true,
+        "priority_tier": true,
+        "rank": true,
+        "recipe_rank": true,
+        "score": true,
+        "signal_tags": true,
+        "stage": true
+      }
+    },
+    "ORDER_INDEPENDENCE": {
+      "each_recipe_alone_equals_together": true,
+      "evidence_and_signal_order_reversed": true,
+      "pass": true,
+      "recipe_permutations": 24
+    },
+    "UNKNOWN_PRESERVATION": {
+      "missing_signal": [
+        "NO_SIGNAL"
+      ],
+      "negative_evidence_not_decisive": [
+        "CONTRADICTED_ABSENT",
+        "CONTRADICTION_NOT_DECISIVE"
+      ],
+      "pass": true,
+      "stale_evidence": [
+        "EVIDENCE_STALE"
+      ],
+      "unbound_evidence": [
+        "EVIDENCE_UNBOUND"
+      ],
+      "withdrawn_source": [
+        "EVIDENCE_WITHDRAWN"
+      ]
+    },
+    "UNKNOWN_PROOF": {
+      "content_sha256": "823617fc347905fd2b5f054816d4540baa9863f7c9f4a155c2b3eb1595f4c3f2",
+      "pass": true,
+      "recipe": "open_probate_property"
+    },
+    "VERSION_BINDING": {
+      "membership_key_unchanged": true,
+      "pass": true,
+      "v1": {
+        "content_sha256": "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d",
+        "policy_digest": "f791facb6c06a6c316c187f4381e2f3d802a4f05bf044e2288c33ee70b5b80af",
+        "recipe_version_id": "published_tax_distress@elig.1"
+      },
+      "v2": {
+        "content_sha256": "94f5ab4493d053befdb41efcfb4d881b1afd9c8641a4eefc97f3df27819135a7",
+        "policy_digest": "481fc659cc7dacf333098c72b78a94d132558effb76e5ef13e75d02211dd05cb",
+        "recipe_version_id": "published_tax_distress@elig.2"
+      }
+    },
+    "WITHDRAWAL_SUPERSESSION": {
+      "history_preserved": [
+        "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d",
+        "da7e7e74ee9cc093fb123490af1b00d6e34a8e86e1e5f3e6fa3193cd432e95dd"
+      ],
+      "pass": true,
+      "prior_match": "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d",
+      "superseding_unknown": "da7e7e74ee9cc093fb123490af1b00d6e34a8e86e1e5f3e6fa3193cd432e95dd"
+    }
+  },
+  "receipts": {
+    "long_term_absentee_potential_equity": {
+      "asset_id": "parcel-37183-0123456",
+      "clauses": [
+        {
+          "clause_id": "absentee_present",
+          "evidence_ids": [
+            "ev-parcel-roll-2026"
+          ],
+          "expect": "PRESENT",
+          "max_age_seconds": 2592000,
+          "min_confidence": "MEDIUM",
+          "negative_evidence_decisive": true,
+          "observed_state": "PRESENT",
+          "outcome": "SATISFIED",
+          "reason_codes": [
+            "SATISFIED_PRESENT"
+          ],
+          "signal_ids": [
+            "sig-absentee-owner"
+          ],
+          "signal_type": "absentee_owner"
+        },
+        {
+          "clause_id": "long_hold_present",
+          "evidence_ids": [
+            "ev-parcel-roll-2026"
+          ],
+          "expect": "PRESENT",
+          "max_age_seconds": null,
+          "min_confidence": "LOW",
+          "negative_evidence_decisive": true,
+          "observed_state": "PRESENT",
+          "outcome": "SATISFIED",
+          "reason_codes": [
+            "SATISFIED_PRESENT"
+          ],
+          "signal_ids": [
+            "sig-long-hold"
+          ],
+          "signal_type": "long_hold"
+        },
+        {
+          "clause_id": "not_government_owned",
+          "evidence_ids": [
+            "ev-parcel-roll-2026"
+          ],
+          "expect": "ABSENT",
+          "max_age_seconds": null,
+          "min_confidence": "HIGH",
+          "negative_evidence_decisive": true,
+          "observed_state": "ABSENT",
+          "outcome": "SATISFIED",
+          "reason_codes": [
+            "SATISFIED_ABSENT"
+          ],
+          "signal_ids": [
+            "sig-government-owner"
+          ],
+          "signal_type": "government_owner"
+        }
+      ],
+      "composition_digest": "9a79e42789129b1a2db19dd10eb778946da7620fd5ecb0990a6eee5602fdba0c",
+      "content_sha256": "9235c77dfb656db63940c2ef323334a74b1d67b183a3761289d673ac4b2cc715",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "decision": "MATCH",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890"
+      },
+      "evidence_lineage": [
+        {
+          "content_sha256": "9ec2d7cba3f2e854bd49753c14100f024305a3f27e38f50e2639c4d36a945f65",
+          "evidence_id": "ev-docket-search-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-06T18:30:00Z",
+          "source_family": "COUNTY_FORECLOSURE_DOCKET",
+          "source_id": "wake-county-foreclosure-docket-search-2026-09-06",
+          "used": false,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890",
+          "evidence_id": "ev-parcel-roll-2026",
+          "exclusion_reason": null,
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-01T06:00:00Z",
+          "source_family": "COUNTY_PARCEL_ROLL",
+          "source_id": "wake-county-parcel-roll-2026-09-01",
+          "used": true,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "d798e3f80b1d173818e2fb9a00c81838dd6cbb2f688c9063ba3a6443bb4b587c",
+          "evidence_id": "ev-probate-index-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-05T09:15:00Z",
+          "source_family": "PUBLIC_PROBATE_INDEX",
+          "source_id": "wake-county-probate-index-search-2026-09-05",
+          "used": false,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "dc1e7d30b6630b8bd18a0cef1d34130ecf4f812d5a3a80f60f5a7f12bf2594c9",
+          "evidence_id": "ev-tax-roll-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-07T12:00:00Z",
+          "source_family": "COUNTY_TAX_ROLL",
+          "source_id": "wake-county-tax-roll-2026-09-07",
+          "used": false,
+          "withdrawn_at": null
+        }
+      ],
+      "membership_key": "20227d8f5544ba5fce51bf4a32628b7dc49fbdaee1b48585f1ab65d235772fb4",
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "61f2cb5b4c235d42a8a92447b2fe165b9519525f2a188b588d196166705e1cb6",
+      "producer_identity": "recipe_engine.opportunity_intelligence.eligibility",
+      "producer_owner": "recipe-engine",
+      "producer_version": "recipe-engine/eligibility@1.0.0",
+      "reason": "MATCH: all 3 clauses satisfied by bound evidence (absentee_present, long_hold_present, not_government_owned)",
+      "recipe_id": "long_term_absentee_potential_equity",
+      "recipe_version_id": "long_term_absentee_potential_equity@elig.1",
+      "schema_version": "neuruh.recipe-engine.eligibility-receipt.v1",
+      "supersedes": null,
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    },
+    "open_probate_property": {
+      "asset_id": "parcel-37183-0123456",
+      "clauses": [
+        {
+          "clause_id": "estate_present",
+          "evidence_ids": [],
+          "expect": "PRESENT",
+          "max_age_seconds": null,
+          "min_confidence": "LOW",
+          "negative_evidence_decisive": false,
+          "observed_state": null,
+          "outcome": "UNKNOWN",
+          "reason_codes": [
+            "SIGNAL_UNKNOWN"
+          ],
+          "signal_ids": [
+            "sig-probate-or-estate"
+          ],
+          "signal_type": "probate_or_estate"
+        },
+        {
+          "clause_id": "not_government_owned",
+          "evidence_ids": [
+            "ev-parcel-roll-2026"
+          ],
+          "expect": "ABSENT",
+          "max_age_seconds": null,
+          "min_confidence": "HIGH",
+          "negative_evidence_decisive": true,
+          "observed_state": "ABSENT",
+          "outcome": "SATISFIED",
+          "reason_codes": [
+            "SATISFIED_ABSENT"
+          ],
+          "signal_ids": [
+            "sig-government-owner"
+          ],
+          "signal_type": "government_owner"
+        }
+      ],
+      "composition_digest": "683b42730b7dc1efc6ebe3978fb2106b98c9e2bf5610db37a431cf31ddfdde7e",
+      "content_sha256": "823617fc347905fd2b5f054816d4540baa9863f7c9f4a155c2b3eb1595f4c3f2",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "decision": "UNKNOWN",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890"
+      },
+      "evidence_lineage": [
+        {
+          "content_sha256": "9ec2d7cba3f2e854bd49753c14100f024305a3f27e38f50e2639c4d36a945f65",
+          "evidence_id": "ev-docket-search-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-06T18:30:00Z",
+          "source_family": "COUNTY_FORECLOSURE_DOCKET",
+          "source_id": "wake-county-foreclosure-docket-search-2026-09-06",
+          "used": false,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890",
+          "evidence_id": "ev-parcel-roll-2026",
+          "exclusion_reason": null,
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-01T06:00:00Z",
+          "source_family": "COUNTY_PARCEL_ROLL",
+          "source_id": "wake-county-parcel-roll-2026-09-01",
+          "used": true,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "d798e3f80b1d173818e2fb9a00c81838dd6cbb2f688c9063ba3a6443bb4b587c",
+          "evidence_id": "ev-probate-index-2026",
+          "exclusion_reason": "SIGNAL_UNKNOWN",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-05T09:15:00Z",
+          "source_family": "PUBLIC_PROBATE_INDEX",
+          "source_id": "wake-county-probate-index-search-2026-09-05",
+          "used": false,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "dc1e7d30b6630b8bd18a0cef1d34130ecf4f812d5a3a80f60f5a7f12bf2594c9",
+          "evidence_id": "ev-tax-roll-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-07T12:00:00Z",
+          "source_family": "COUNTY_TAX_ROLL",
+          "source_id": "wake-county-tax-roll-2026-09-07",
+          "used": false,
+          "withdrawn_at": null
+        }
+      ],
+      "membership_key": "363b5ceeb678c3c1ec40809812f39ad3cd35f177feddb94e09088af1a96598c7",
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "65dbc69cfa727f150f359ffb8cef7cbf664c6d5b7e38c5fbd51fba10872a8543",
+      "producer_identity": "recipe_engine.opportunity_intelligence.eligibility",
+      "producer_owner": "recipe-engine",
+      "producer_version": "recipe-engine/eligibility@1.0.0",
+      "reason": "UNKNOWN: clause estate_present: SIGNAL_UNKNOWN unresolved",
+      "recipe_id": "open_probate_property",
+      "recipe_version_id": "open_probate_property@elig.1",
+      "schema_version": "neuruh.recipe-engine.eligibility-receipt.v1",
+      "supersedes": null,
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    },
+    "published_tax_distress": {
+      "asset_id": "parcel-37183-0123456",
+      "clauses": [
+        {
+          "clause_id": "not_government_owned",
+          "evidence_ids": [
+            "ev-parcel-roll-2026"
+          ],
+          "expect": "ABSENT",
+          "max_age_seconds": null,
+          "min_confidence": "HIGH",
+          "negative_evidence_decisive": true,
+          "observed_state": "ABSENT",
+          "outcome": "SATISFIED",
+          "reason_codes": [
+            "SATISFIED_ABSENT"
+          ],
+          "signal_ids": [
+            "sig-government-owner"
+          ],
+          "signal_type": "government_owner"
+        },
+        {
+          "clause_id": "tax_present",
+          "evidence_ids": [
+            "ev-tax-roll-2026"
+          ],
+          "expect": "PRESENT",
+          "max_age_seconds": null,
+          "min_confidence": "MEDIUM",
+          "negative_evidence_decisive": true,
+          "observed_state": "PRESENT",
+          "outcome": "SATISFIED",
+          "reason_codes": [
+            "SATISFIED_PRESENT"
+          ],
+          "signal_ids": [
+            "sig-tax-delinquent"
+          ],
+          "signal_type": "tax_delinquent"
+        }
+      ],
+      "composition_digest": "8b6c75b155583d278876667f11e7ec4b38bf7a98cfa19062b31bc9b44835e078",
+      "content_sha256": "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "decision": "MATCH",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890",
+        "ev-tax-roll-2026": "dc1e7d30b6630b8bd18a0cef1d34130ecf4f812d5a3a80f60f5a7f12bf2594c9"
+      },
+      "evidence_lineage": [
+        {
+          "content_sha256": "9ec2d7cba3f2e854bd49753c14100f024305a3f27e38f50e2639c4d36a945f65",
+          "evidence_id": "ev-docket-search-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-06T18:30:00Z",
+          "source_family": "COUNTY_FORECLOSURE_DOCKET",
+          "source_id": "wake-county-foreclosure-docket-search-2026-09-06",
+          "used": false,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890",
+          "evidence_id": "ev-parcel-roll-2026",
+          "exclusion_reason": null,
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-01T06:00:00Z",
+          "source_family": "COUNTY_PARCEL_ROLL",
+          "source_id": "wake-county-parcel-roll-2026-09-01",
+          "used": true,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "d798e3f80b1d173818e2fb9a00c81838dd6cbb2f688c9063ba3a6443bb4b587c",
+          "evidence_id": "ev-probate-index-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-05T09:15:00Z",
+          "source_family": "PUBLIC_PROBATE_INDEX",
+          "source_id": "wake-county-probate-index-search-2026-09-05",
+          "used": false,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "dc1e7d30b6630b8bd18a0cef1d34130ecf4f812d5a3a80f60f5a7f12bf2594c9",
+          "evidence_id": "ev-tax-roll-2026",
+          "exclusion_reason": null,
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-07T12:00:00Z",
+          "source_family": "COUNTY_TAX_ROLL",
+          "source_id": "wake-county-tax-roll-2026-09-07",
+          "used": true,
+          "withdrawn_at": null
+        }
+      ],
+      "membership_key": "4a91fe6436fe8a32ca5d313adb95631e306fce238d03cccc64330b76fc6f6428",
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "f791facb6c06a6c316c187f4381e2f3d802a4f05bf044e2288c33ee70b5b80af",
+      "producer_identity": "recipe_engine.opportunity_intelligence.eligibility",
+      "producer_owner": "recipe-engine",
+      "producer_version": "recipe-engine/eligibility@1.0.0",
+      "reason": "MATCH: all 2 clauses satisfied by bound evidence (not_government_owned, tax_present)",
+      "recipe_id": "published_tax_distress",
+      "recipe_version_id": "published_tax_distress@elig.1",
+      "schema_version": "neuruh.recipe-engine.eligibility-receipt.v1",
+      "supersedes": null,
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    },
+    "stalled_tax_foreclosure_heirship": {
+      "asset_id": "parcel-37183-0123456",
+      "clauses": [
+        {
+          "clause_id": "estate_present",
+          "evidence_ids": [],
+          "expect": "PRESENT",
+          "max_age_seconds": null,
+          "min_confidence": "LOW",
+          "negative_evidence_decisive": false,
+          "observed_state": null,
+          "outcome": "UNKNOWN",
+          "reason_codes": [
+            "SIGNAL_UNKNOWN"
+          ],
+          "signal_ids": [
+            "sig-probate-or-estate"
+          ],
+          "signal_type": "probate_or_estate"
+        },
+        {
+          "clause_id": "foreclosure_present",
+          "evidence_ids": [
+            "ev-docket-search-2026"
+          ],
+          "expect": "PRESENT",
+          "max_age_seconds": null,
+          "min_confidence": "MEDIUM",
+          "negative_evidence_decisive": true,
+          "observed_state": "ABSENT",
+          "outcome": "CONTRADICTED",
+          "reason_codes": [
+            "CONTRADICTED_ABSENT"
+          ],
+          "signal_ids": [
+            "sig-pre-foreclosure"
+          ],
+          "signal_type": "pre_foreclosure"
+        },
+        {
+          "clause_id": "not_government_owned",
+          "evidence_ids": [
+            "ev-parcel-roll-2026"
+          ],
+          "expect": "ABSENT",
+          "max_age_seconds": null,
+          "min_confidence": "HIGH",
+          "negative_evidence_decisive": true,
+          "observed_state": "ABSENT",
+          "outcome": "SATISFIED",
+          "reason_codes": [
+            "SATISFIED_ABSENT"
+          ],
+          "signal_ids": [
+            "sig-government-owner"
+          ],
+          "signal_type": "government_owner"
+        }
+      ],
+      "composition_digest": "d42c2728c0ad6ed105468ed06fbeffbd8c4a4cba7ca59101e94c69bf3197e968",
+      "content_sha256": "d6a03a7365512e32c798012f9e6a457e6111f780ea669681efee2ac7d1887255",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "decision": "NO_MATCH",
+      "evaluated_at": "2026-09-08T01:00:00Z",
+      "evaluation_kind": "INDEPENDENT_ELIGIBILITY",
+      "evidence_digests": {
+        "ev-docket-search-2026": "9ec2d7cba3f2e854bd49753c14100f024305a3f27e38f50e2639c4d36a945f65",
+        "ev-parcel-roll-2026": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890"
+      },
+      "evidence_lineage": [
+        {
+          "content_sha256": "9ec2d7cba3f2e854bd49753c14100f024305a3f27e38f50e2639c4d36a945f65",
+          "evidence_id": "ev-docket-search-2026",
+          "exclusion_reason": null,
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-06T18:30:00Z",
+          "source_family": "COUNTY_FORECLOSURE_DOCKET",
+          "source_id": "wake-county-foreclosure-docket-search-2026-09-06",
+          "used": true,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890",
+          "evidence_id": "ev-parcel-roll-2026",
+          "exclusion_reason": null,
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-01T06:00:00Z",
+          "source_family": "COUNTY_PARCEL_ROLL",
+          "source_id": "wake-county-parcel-roll-2026-09-01",
+          "used": true,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "d798e3f80b1d173818e2fb9a00c81838dd6cbb2f688c9063ba3a6443bb4b587c",
+          "evidence_id": "ev-probate-index-2026",
+          "exclusion_reason": "SIGNAL_UNKNOWN",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-05T09:15:00Z",
+          "source_family": "PUBLIC_PROBATE_INDEX",
+          "source_id": "wake-county-probate-index-search-2026-09-05",
+          "used": false,
+          "withdrawn_at": null
+        },
+        {
+          "content_sha256": "dc1e7d30b6630b8bd18a0cef1d34130ecf4f812d5a3a80f60f5a7f12bf2594c9",
+          "evidence_id": "ev-tax-roll-2026",
+          "exclusion_reason": "NOT_REFERENCED_BY_RECIPE",
+          "ledger_state": "BOUND",
+          "observed_at": "2026-09-07T12:00:00Z",
+          "source_family": "COUNTY_TAX_ROLL",
+          "source_id": "wake-county-tax-roll-2026-09-07",
+          "used": false,
+          "withdrawn_at": null
+        }
+      ],
+      "membership_key": "92678bc2847082e2039b9f52f3bd3828db8dc373563e8daa82c51a5ad55f9c86",
+      "mode": "FIXTURE",
+      "opportunity_id": "candidate-willow-120",
+      "policy_digest": "6c333211c4f4fa1bf4ed7cb52ee3be1570162f143f2cf931406739f2cb057d61",
+      "producer_identity": "recipe_engine.opportunity_intelligence.eligibility",
+      "producer_owner": "recipe-engine",
+      "producer_version": "recipe-engine/eligibility@1.0.0",
+      "reason": "NO_MATCH: clause foreclosure_present contradicted by bound evidence (pre_foreclosure observed ABSENT, expected PRESENT, negative evidence decisive)",
+      "recipe_id": "stalled_tax_foreclosure_heirship",
+      "recipe_version_id": "stalled_tax_foreclosure_heirship@elig.1",
+      "schema_version": "neuruh.recipe-engine.eligibility-receipt.v1",
+      "supersedes": null,
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "valid_until": "2026-09-09T01:00:00Z"
+    }
+  },
+  "recipes_in_fixture": {
+    "A": "published_tax_distress",
+    "B": "stalled_tax_foreclosure_heirship",
+    "C": "open_probate_property",
+    "D": "long_term_absentee_potential_equity"
+  }
+}

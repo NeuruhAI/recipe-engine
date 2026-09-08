@@ -7,8 +7,31 @@
 [extend]
 useDefault = true
 
-[allowlist]
+# gitleaks >= 8.21 refuses the deprecated singular [allowlist] table next to
+# [[allowlists]]; this block is the original entry in the current form, same
+# paths, same meaning.
+[[allowlists]]
 description = "Founder Runtime golden evidence fixtures (content digests, not credentials)"
 paths = [
   '''tests/founder_runtime/fixtures/.*''',
 ]
+
+# Astra P1 independent eligibility fixture + sealed proof artifact. Their
+# membership_key / policy_digest / composition_digest / context_digest /
+# content_sha256 values are SHA-256 content digests (the membership key is
+# content_hash({tenant, universe, opportunity, recipe}), identical to the
+# lead-recipe-os derivation). The field name contains "key", which is what the
+# generic-api-key entropy rule looks for. Narrowed on BOTH axes: only these two
+# paths, and only a complete lowercase 64-hex value. Anything else there is
+# still reported.
+[[allowlists]]
+description = "P1 eligibility fixture and proof: SHA-256 digests, not credentials"
+condition = "AND"
+paths = [
+  '''tests/opportunity_intelligence/fixtures/p1_independent_eligibility\.json''',
+  '''artifacts/P1_FIXTURE_PROOF\.json''',
+]
+regexes = [
+  '''^[a-f0-9]{64}$''',
+]
+regexTarget = "secret"
