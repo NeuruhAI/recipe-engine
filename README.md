@@ -107,6 +107,8 @@ becomes NO_MATCH; rank, score and primary_recipe are refused as inputs.
   lead-recipe-os intake contract with a byte-compatible hash)
 - ruling and proofs: `docs/P1_INDEPENDENT_ELIGIBILITY_PRODUCER_RULING.md`,
   `scripts/p1_independent_eligibility_proof.py`
+- thin CLI (P1B harness bind; stdout JSONL, no daemon/store):
+  `python scripts/run_independent_eligibility.py --fixture tests/opportunity_intelligence/fixtures/p1_independent_eligibility.json`
 - score: `landos.opportunity-score.v1`
 
 The recipe contains only declared rules and integer deltas. LandOS returns the
