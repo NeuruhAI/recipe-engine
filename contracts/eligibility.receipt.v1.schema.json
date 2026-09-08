@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.recipe-engine.eligibility-receipt.v1",
+  "title": "EligibilityReceipt",
+  "description": "One candidate, one recipe version, one decision (MATCH / NO_MATCH / UNKNOWN) with clause-level evidence, lineage, freshness boundary, replay identity, producer identity and an explicit supersession pointer. content_sha256 = sha256(canonical JSON of every other field; sorted keys, compact separators, ensure_ascii=false). A receipt never carries rank, score, primary_recipe, stage, lead or contact fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "producer_owner",
+    "producer_identity",
+    "producer_version",
+    "evaluation_kind",
+    "tenant_id",
+    "universe_id",
+    "opportunity_id",
+    "asset_id",
+    "recipe_id",
+    "recipe_version_id",
+    "policy_digest",
+    "composition_digest",
+    "membership_key",
+    "context_digest",
+    "evidence_digests",
+    "evidence_lineage",
+    "clauses",
+    "decision",
+    "reason",
+    "evaluated_at",
+    "valid_until",
+    "supersedes",
+    "content_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "neuruh.recipe-engine.eligibility-receipt.v1"},
+    "mode": {"enum": ["FIXTURE", "SHADOW", "LIVE", "SYNTHETIC"]},
+    "producer_owner": {"const": "recipe-engine"},
+    "producer_identity": {"type": "string", "minLength": 1},
+    "producer_version": {"type": "string", "minLength": 1},
+    "evaluation_kind": {"const": "INDEPENDENT_ELIGIBILITY"},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "universe_id": {"type": "string", "minLength": 1},
+    "opportunity_id": {"type": "string", "minLength": 1},
+    "asset_id": {"type": "string", "minLength": 1},
+    "recipe_id": {"type": "string", "minLength": 1},
+    "recipe_version_id": {"type": "string", "minLength": 1},
+    "policy_digest": {"$ref": "#/$defs/sha256"},
+    "composition_digest": {"$ref": "#/$defs/sha256"},
+    "membership_key": {
+      "$ref": "#/$defs/sha256",
+      "description": "content_hash({tenant_id, universe_id, opportunity_id, recipe_id}); version-independent, identical to the lead-recipe-os membership key."
+    },
+    "context_digest": {"$ref": "#/$defs/sha256"},
+    "evidence_digests": {
+      "type": "object",
+      "propertyNames": {"minLength": 1},
+      "additionalProperties": {"$ref": "#/$defs/sha256"},
+      "description": "Evidence that supported a known clause finding. Empty only when decision is UNKNOWN."
+    },
+    "evidence_lineage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_id", "source_id", "source_family", "content_sha256", "ledger_state", "observed_at", "withdrawn_at", "used", "exclusion_reason"],
+        "properties": {
+          "evidence_id": {"type": "string", "minLength": 1},
+          "source_id": {"type": "string", "minLength": 1},
+          "source_family": {"type": "string", "minLength": 1},
+          "content_sha256": {"$ref": "#/$defs/sha256"},
+          "ledger_state": {"enum": ["BOUND", "NOT_EVALUATED", "UNWIRED", "SOURCE_FAILED"]},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "withdrawn_at": {"type": ["string", "null"], "format": "date-time"},
+          "used": {"type": "boolean"},
+          "exclusion_reason": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "clauses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clause_id", "signal_type", "expect", "negative_evidence_decisive", "min_confidence", "max_age_seconds", "signal_ids", "outcome", "observed_state", "reason_codes", "evidence_ids"],
+        "properties": {
+          "clause_id": {"type": "string", "minLength": 1},
+          "signal_type": {"type": "string", "minLength": 1},
+          "expect": {"enum": ["PRESENT", "ABSENT"]},
+          "negative_evidence_decisive": {"type": "boolean"},
+          "min_confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
+          "max_age_seconds": {"type": ["integer", "null"], "minimum": 1},
+          "signal_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "outcome": {"enum": ["SATISFIED", "CONTRADICTED", "UNKNOWN"]},
+          "observed_state": {"enum": ["PRESENT", "ABSENT", "CONFLICTED", null]},
+          "reason_codes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": [
+                "SATISFIED_PRESENT", "SATISFIED_ABSENT", "CONTRADICTED_PRESENT", "CONTRADICTED_ABSENT",
+                "CONTRADICTION_NOT_DECISIVE", "NO_SIGNAL", "SIGNAL_UNKNOWN", "SIGNAL_CONFLICTED",
+                "CONFIDENCE_BELOW_FLOOR", "NO_EVIDENCE_LINEAGE", "EVIDENCE_UNBOUND",
+                "EVIDENCE_WITHDRAWN", "EVIDENCE_STALE"
+              ]
+            }
+          },
+          "evidence_ids": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "decision": {"enum": ["MATCH", "NO_MATCH", "UNKNOWN"]},
+    "reason": {"type": "string", "minLength": 1},
+    "evaluated_at": {"type": "string", "format": "date-time"},
+    "valid_until": {"type": "string", "format": "date-time"},
+    "supersedes": {
+      "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}],
+      "description": "content_sha256 of the prior receipt for the same membership_key that this evaluation replaces. History is never deleted."
+    },
+    "content_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

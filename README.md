@@ -93,6 +93,20 @@ Recipe Engine owns the versioned, portable policy sent to LandOS:
 - signal/property population: `neuruh.opportunity-intelligence.property-population.v1`
 - LandOS result: `neuruh.opportunity-intelligence.result.v1`
 - canonical recipe: `land_acquisition_explainable@1.0.0`
+
+## Independent eligibility receipts (Astra P1)
+
+Beside the primary ranking feed, `recipe_engine.opportunity_intelligence.eligibility`
+evaluates one candidate independently against each requested recipe version and
+emits an immutable `MATCH` / `NO_MATCH` / `UNKNOWN` receipt. UNKNOWN never
+becomes NO_MATCH; rank, score and primary_recipe are refused as inputs.
+
+- policy: `neuruh.recipe-engine.eligibility-policy.v1`
+- context: `neuruh.recipe-engine.eligibility-context.v1`
+- receipt: `neuruh.recipe-engine.eligibility-receipt.v1` (projects onto the
+  lead-recipe-os intake contract with a byte-compatible hash)
+- ruling and proofs: `docs/P1_INDEPENDENT_ELIGIBILITY_PRODUCER_RULING.md`,
+  `scripts/p1_independent_eligibility_proof.py`
 - score: `landos.opportunity-score.v1`
 
 The recipe contains only declared rules and integer deltas. LandOS returns the
