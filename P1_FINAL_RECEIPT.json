@@ -1,0 +1,184 @@
+{
+  "STATUS": "SOURCE_PASS",
+  "MISSION_ID": "NEURUH-RECIPE-P1-INDEPENDENT-ELIGIBILITY-20260908",
+  "ROLE": "RECIPE_ENGINE_OWNER_IMPLEMENTATION",
+  "CANONICAL_OWNER": "NeuruhAI/recipe-engine",
+  "BRANCH": "astra/p1-independent-eligibility-producer-20260908",
+  "BASE_SHA": "4eddb8fe332b63f57edcdf0fab23aa4633572103",
+  "START_SHA": "aa88b197be2f44182d9d26fce1651fedae2c75f7",
+  "FINAL_SHA": "165367af788e09efa87a5acf5aa4f4d651aac75f",
+  "FINAL_SHA_NOTE": "implementation commit; this receipt is committed on top of it as a docs-only commit",
+  "RISK": "SOURCE_ONLY",
+  "CURRENT_EVALUATOR": {
+    "ruling": "ORDERED_PRIMARY_ONLY; INDEPENDENT_ALREADY_EXISTS=NO; MISSING_SEAM=recipe contract declaring eligibility predicates",
+    "primary_path": "scripts/rank_nc_curative_raw.py::recipe(row) — if/elif chain, one recipe per row, truthy(None) reads missing as False (UNKNOWN collapses to NO_MATCH by construction)",
+    "receipts": "recipe_engine/opportunity_intelligence/oppack_receipts.py — why-matched/why-ranked for the primary assignment only",
+    "reused": [
+      "contracts.SIGNAL_STATES/CONFIDENCE_LEVELS/OpportunityContractError",
+      "recipes.land_acquisition_recipe_v1 signal vocabulary (CANONICAL_SIGNAL_TYPES)",
+      "fixtures signal shape",
+      "evaluate.assert_unknown_not_collapsed discipline",
+      "closed_loop/recipe_eval RecipeRef id+version+digest discipline"
+    ],
+    "not_bound": [
+      "closed_loop/ledger.py LoopLedger (storage binding is a separate seam)"
+    ],
+    "census": "artifacts/P1_CURRENT_EVALUATOR_CENSUS.tsv"
+  },
+  "NEW_PRODUCER": {
+    "module": "recipe_engine/opportunity_intelligence/eligibility.py",
+    "producer_version": "recipe-engine/eligibility@1.0.0",
+    "producer_identity": "recipe_engine.opportunity_intelligence.eligibility",
+    "contracts": [
+      "neuruh.recipe-engine.eligibility-policy.v1",
+      "neuruh.recipe-engine.eligibility-context.v1",
+      "neuruh.recipe-engine.eligibility-receipt.v1"
+    ],
+    "schemas": [
+      "contracts/eligibility.policy.v1.schema.json",
+      "contracts/eligibility.context.v1.schema.json",
+      "contracts/eligibility.receipt.v1.schema.json"
+    ],
+    "consumer_projection": "to_intake_receipt() -> neuruh.lead-recipe-os.independent-eligibility-intake.v1 (18 fields, byte-compatible content_hash; Astra fixture receipt 35f723d1… reproduces)",
+    "entry_points": [
+      "build_eligibility_policy",
+      "validate_eligibility_context",
+      "evaluate_eligibility",
+      "evaluate_recipes",
+      "validate_eligibility_receipt",
+      "to_intake_receipt",
+      "EligibilityReceiptJournal"
+    ],
+    "io": "none (no file, socket, sqlite, requests; evaluated_at = caller as_of)",
+    "crosswalk": "artifacts/P1_RECEIPT_CONTRACT_CROSSWALK.tsv",
+    "ruling": "docs/P1_INDEPENDENT_ELIGIBILITY_PRODUCER_RULING.md"
+  },
+  "RECIPES_IN_FIXTURE": {
+    "count": 4,
+    "fixture": "tests/opportunity_intelligence/fixtures/p1_independent_eligibility.json",
+    "fixture_sha256": "f6610c670361d0d6af467d4092d9c29342e448a7218f23e9b38548ec684bfef5",
+    "property": {
+      "tenant_id": "fixture-tenant",
+      "universe_id": "fixture-universe-nc-wake",
+      "opportunity_id": "candidate-willow-120",
+      "asset_id": "parcel-37183-0123456",
+      "as_of": "2026-09-08T01:00:00Z"
+    },
+    "A": {
+      "recipe_id": "published_tax_distress",
+      "decision": "MATCH",
+      "content_sha256": "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d"
+    },
+    "B": {
+      "recipe_id": "stalled_tax_foreclosure_heirship",
+      "decision": "NO_MATCH",
+      "content_sha256": "d6a03a7365512e32c798012f9e6a457e6111f780ea669681efee2ac7d1887255"
+    },
+    "C": {
+      "recipe_id": "open_probate_property",
+      "decision": "UNKNOWN",
+      "content_sha256": "823617fc347905fd2b5f054816d4540baa9863f7c9f4a155c2b3eb1595f4c3f2"
+    },
+    "D": {
+      "recipe_id": "long_term_absentee_potential_equity",
+      "decision": "MATCH",
+      "content_sha256": "9235c77dfb656db63940c2ef323334a74b1d67b183a3761289d673ac4b2cc715"
+    }
+  },
+  "MATCH_PROOF": {
+    "result": "PASS",
+    "receipts": {
+      "published_tax_distress": "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d",
+      "long_term_absentee_potential_equity": "9235c77dfb656db63940c2ef323334a74b1d67b183a3761289d673ac4b2cc715"
+    },
+    "evidence": "every clause SATISFIED by BOUND fresh evidence; evidence_digests non-empty"
+  },
+  "NO_MATCH_PROOF": {
+    "result": "PASS",
+    "receipt": "d6a03a7365512e32c798012f9e6a457e6111f780ea669681efee2ac7d1887255",
+    "evidence": "pre_foreclosure observed ABSENT (HIGH, searched docket) on a clause with negative_evidence_decisive=true; estate clause UNKNOWN in the same recipe does not soften it; the same contradiction on a non-decisive clause yields UNKNOWN"
+  },
+  "UNKNOWN_PROOF": {
+    "result": "PASS",
+    "receipt": "823617fc347905fd2b5f054816d4540baa9863f7c9f4a155c2b3eb1595f4c3f2",
+    "evidence": "probate_or_estate UNKNOWN (SIGNAL_UNKNOWN); also proven for missing signal (NO_SIGNAL), withdrawn evidence, stale evidence, unbound custody, confidence below floor, no lineage, conflict — none becomes NO_MATCH"
+  },
+  "ORDER_INDEPENDENCE": {
+    "result": "PASS",
+    "evidence": "24 recipe permutations, reversed evidence/signal order, and each-recipe-alone produce identical content hashes; receipts returned in canonical (recipe_id, recipe_version_id) order"
+  },
+  "IDEMPOTENT_REPLAY": {
+    "result": "PASS",
+    "evidence": "same inputs reproduce identical receipt dicts and hashes; journal append returns False on replay and does not grow; timestamp spellings Z/+00:00/+02:00 hash identically"
+  },
+  "VERSION_BINDING": {
+    "result": "PASS",
+    "evidence": "new recipe_version_id changes policy_digest and content_sha256; membership_key, opportunity_id, asset_id, context_digest unchanged; policy/composition digest tamper refused"
+  },
+  "WITHDRAWAL_SUPERSESSION": {
+    "result": "PASS",
+    "evidence": "withdrawn tax-roll evidence re-evaluates to UNKNOWN (EVIDENCE_WITHDRAWN), supersedes the prior MATCH; history keeps the prior receipt byte-identical; second live truth without supersedes refused; cross-membership / unknown / backwards / double supersession refused"
+  },
+  "MULTI_RECIPE_MATCH": {
+    "result": "PASS",
+    "evidence": "A and D are both MATCH for one property under distinct membership keys; journal holds 4 live memberships for the candidate"
+  },
+  "CANDIDATE_IDENTITY_UNCHANGED": {
+    "result": "PASS",
+    "evidence": "one (tenant, universe, opportunity, asset) identity across all four receipts; no stage/lead/crm field ever emitted"
+  },
+  "NO_RANK_OR_PRIMARY_AUTHORITY": {
+    "result": "PASS",
+    "evidence": "primary_recipe, rank, recipe_rank, global_rank, score, curative_priority_score, priority_tier, signal_tags, component_contributions, recipe_membership_count, research_lane, stage, lead_status, contact_authorized, phone, recipe_id refused at context and signal level"
+  },
+  "LEAD_PROMOTION": "NO",
+  "CONTACT_AUTHORITY": "NO",
+  "CRM_WRITTEN": "NO",
+  "SUPABASE_MUTATED": "NO",
+  "DEEDSONAR_MUTATED": "NO",
+  "MIGRATIONS_APPLIED": "NO",
+  "OUTREACH_ENABLED": "NO",
+  "MERGED": "NO",
+  "DEPLOYED": "NO",
+  "SECOND_RECIPE_ENGINE": "NO",
+  "SECOND_MEMBERSHIP_STORE": "NO (EligibilityReceiptJournal is a process-local supersession court with no I/O; DeedSonar candidate_recipe_membership remains the store)",
+  "TESTS": {
+    "new_unit_court": {
+      "file": "tests/opportunity_intelligence/test_independent_eligibility.py",
+      "result": "62 passed, 1 skipped (jsonschema absent in repo venv); the schema test passes in a venv with jsonschema"
+    },
+    "cross_repo_court": {
+      "file": "tests/opportunity_intelligence/test_p1_lead_recipe_os_intake_court.py",
+      "result": "6 passed against lead_recipe_os kernel @aaee1daef45d021c389dd62eca2928219f1ebe1e (git archive into a scratch venv with pydantic 2.13 + pydantic-settings); skipped unless LEAD_RECIPE_OS_KERNEL_PATH is set"
+    },
+    "proof_runner": {
+      "file": "scripts/p1_independent_eligibility_proof.py",
+      "result": "13/13 PASS",
+      "artifact": "artifacts/P1_FIXTURE_PROOF.json",
+      "artifact_sha256": "f23e68a7bb6ff800a89c6eb5df6c25ce92a9aff8b5564fb5fadd00eda5fedf5f",
+      "byte_stable": true
+    },
+    "full_suite": {
+      "command": ".venv/bin/python -m pytest -q tests",
+      "before": "1214 passed, 7 skipped, 1 failed",
+      "after": "1276 passed, 14 skipped, 1 failed",
+      "only_failure": "tests/founder_runtime/test_p2b_canary.py::CanaryRealEnvHoldTests::test_gate_opens_but_canary_holds_on_service_availability — pre-existing, environment-dependent, identical on the base commit"
+    },
+    "secret_scan": "gitleaks 8.30.1 protect --staged: no leaks; .gitleaks.toml gained a path+shape (64-hex) allowlist for the fixture and proof artifact, and the legacy singular [allowlist] was converted to [[allowlists]] with identical paths because gitleaks refuses to mix the forms"
+  },
+  "FILES_CHANGED": 15,
+  "BLOCKERS": "NONE for the source implementation",
+  "NOT_IN_SCOPE_BY_MISSION": [
+    "storage binding (JSONL / closed-loop ledger / Founder Runtime persistence)",
+    "live eligibility-context producer from source_factory signals",
+    "P3 canonical catalog crosswalk (fixture policies encode census recipe ids but are fixtures)",
+    "DeedSonar PR52 / QuerySpec membership read"
+  ],
+  "FOREIGN_REPOS_TOUCHED": "NONE — lead-recipe-os read only via git show/archive at aaee1da; the fable/universal-opportunity-census-20260908 custody notice from another session was respected",
+  "NEXT_CONSUMER": "DEEDSONAR_MEMBERSHIP_READ_AFTER_P3_AND_PR52_APPLY",
+  "FOUNDER_ACTION_REQUIRED": [
+    "review branch astra/p1-independent-eligibility-producer-20260908 and decide merge (merge was forbidden in-mission)",
+    "accept neuruh.recipe-engine.eligibility-policy.v1 as the predicate form the P3 catalog crosswalk will populate per recipe version",
+    "choose the storage binding seam for eligibility receipts (closed-loop ledger vs Founder Runtime persistence vs DeedSonar membership table) before any runtime promotion"
+  ]
+}
