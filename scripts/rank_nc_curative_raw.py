@@ -188,6 +188,59 @@ def recipe(row: dict[str, Any]) -> tuple[str, str]:
     return "published_tax_distress", "ENRICHMENT"
 
 
+# The ladder in ``recipe`` is first-match-wins: it returns exactly ONE recipe
+# id per row and silently discards every other branch whose predicate is also
+# true.  ``recipe_matches`` enumerates the SAME predicates in the SAME order
+# without collapsing them.  It adds no predicate, no weight and no score;
+# ``recipe_matches(row)[0] == recipe(row)[0]`` for every row, by construction.
+#
+# ``published_tax_distress`` is the ladder's unconditional fallthrough, not a
+# positive predicate, so it is a match only when no positive branch fires.
+# Deriving it from ``source_types`` or from a score factor would be a new
+# recipe predicate and is refused here.
+RECIPE_LADDER: tuple[tuple[str, str], ...] = (
+    ("stalled_tax_foreclosure_heirship", "TITLE_CURATIVE_HEIR"),
+    ("heir_property_acquisition_research", "TITLE_CURATIVE_HEIR"),
+    ("tax_foreclosure_fractional_title", "TITLE_CURATIVE"),
+    ("tax_foreclosure_curative", "TITLE_CURATIVE"),
+    ("fractional_family_ownership", "TITLE_CURATIVE"),
+    ("long_term_absentee_potential_equity", "ACQUISITION_RESEARCH"),
+    ("published_tax_distress", "ENRICHMENT"),
+)
+RECIPE_FALLTHROUGH_ID = "published_tax_distress"
+
+
+def recipe_matches(row: dict[str, Any]) -> list[str]:
+    """Every ladder branch whose predicate holds, in ladder precedence order.
+
+    Position 0 is the primary and equals ``recipe(row)[0]``.  The fallthrough
+    id appears only when no positive branch matched (then it is the sole
+    element), exactly as the ladder would have returned it.
+    """
+    heir = truthy(row.get("heir_indicator"))
+    fragmented = truthy(row.get("fragmented_ownership_indicator"))
+    foreclosure = truthy(row.get("tax_foreclosure_indicator")) or "tax_foreclosure_case" in str(row.get("source_types") or "")
+    out_state = truthy(row.get("out_of_state"))
+    years = integer(row.get("years_owned")) or 0
+
+    predicates = (
+        heir and foreclosure,
+        heir,
+        foreclosure and fragmented,
+        foreclosure,
+        fragmented,
+        out_state and years >= 20,
+    )
+    matches = [
+        recipe_id
+        for (recipe_id, _lane), holds in zip(RECIPE_LADDER[:-1], predicates)
+        if holds
+    ]
+    if not matches:
+        matches.append(RECIPE_FALLTHROUGH_ID)
+    return matches
+
+
 def tier(score: int) -> str:
     if score >= 85:
         return "A"
