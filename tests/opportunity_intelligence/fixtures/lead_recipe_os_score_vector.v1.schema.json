@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.lead-recipe-os.score-vector.v1",
+  "title": "ScoreVector v1 — composed adapter receipts; NOT_EVALUATED is not LOW_SCORE",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "tenant_id",
+    "universe_id",
+    "opportunity_id",
+    "components",
+    "content_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": "neuruh.lead-recipe-os.score-vector.v1" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "universe_id": { "type": "string", "minLength": 1 },
+    "opportunity_id": { "type": "string", "minLength": 1 },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "evaluation_state", "organ"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "organ": { "type": "string", "minLength": 1 },
+          "evaluation_state": {
+            "enum": ["NOT_EVALUATED", "EVALUATED", "UNWIRED", "SOURCE_FAILED", "UNKNOWN", "ABSENT", "CONFLICTED", "ZERO_RESULTS"]
+          },
+          "value": { "type": ["number", "null"] },
+          "formula": { "type": ["string", "null"] },
+          "mode": { "enum": ["FIXTURE", "LIVE"] },
+          "receipt_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}
