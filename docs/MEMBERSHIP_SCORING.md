@@ -24,7 +24,7 @@ of 20,734 rows) and a blank `years_owned` (all 20,734) read as known negatives.
 | `load_strategy(strategy_id)` | a sha-pinned strategy (`strategies/<id>.json`, registry in `STRATEGY_REGISTRY`) |
 | `score_membership(row, recipe_id, strategy=…)` | one membership's score vector, evidence, counter-evidence, economics |
 | `rank(scored_memberships)` | a `RankedUniverse`; `universe.get(opportunity_key, recipe_id)` is `rank(opportunity, recipe, strategy)` |
-| `to_score_vector(receipt, tenant_id=…, universe_id=…)` | Lead Recipe OS `score-vector.v1`, re-hashed identically by its kernel |
+| `to_score_vector(receipt, tenant_id=…, universe_id=…)` | Lead Recipe OS `score-vector.v1`, re-hashed identically by its kernel; components named `<recipe_id>.<dimension>@<strategy_id>` |
 | `membership_projection_row(receipt)` | one loader row for `candidate_recipe_membership` |
 
 ### Receipt `neuruh.recipe-engine.membership-score.v1`
@@ -68,6 +68,15 @@ of 20,734 rows) and a blank `years_owned` (all 20,734) read as known negatives.
 - `content_sha256` — Lead Recipe OS consumer canon.
 
 No receipt carries a phone, contact authorization or outreach field.
+
+### Not the recipe compiler's score vector
+
+The recipe compiler (PR #22) also emits ten dimensions per recipe, named
+`<recipe_id>.<dimension>`. Those are ELIGIBILITY measures: amplifiers satisfied,
+days to the nearest deadline, defeaters found, `strategic_fit` 1/0 for MATCH/NO_MATCH.
+These are RANKING points: the strategy's factor deltas, distributed by dimension.
+Same dimension names, different units. The `@<strategy_id>` suffix keeps both in
+one kernel vector without either being read as the other.
 
 ### Strategy `neuruh.recipe-engine.scoring-strategy.v1`
 

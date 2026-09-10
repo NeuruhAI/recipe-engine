@@ -916,20 +916,28 @@ def to_score_vector(
 ) -> dict[str, Any]:
     """Project onto Lead Recipe OS ``score-vector.v1`` so its kernel re-hashes it identically.
 
+    Names are ``<recipe_id>.<dimension>@<strategy_id>``.  The recipe compiler
+    names its per-recipe ELIGIBILITY measures ``<recipe_id>.<dimension>``
+    (amplifiers satisfied, days to deadline, defeaters found); these are the
+    RANKING strategy's points, a different unit, so the suffix keeps the two
+    composable in one vector without one being read as the other.
+
     Every declared ScoreComponent field is emitted (the kernel dumps defaults),
     values are floats (the kernel types them ``float``) and extras ride along.
     """
     validate_membership_score_receipt(receipt)
     if mode not in {"FIXTURE", "LIVE"}:
         raise ScoringError("score-vector mode must be FIXTURE or LIVE")
+    recipe_id = receipt["recipe"]["recipe_id"]
+    strategy_id = receipt["strategy"]["strategy_id"]
     components = []
     for component in receipt["score_vector"]["components"]:
         projected = {key: value for key, value in component.items() if key not in {"value", "receipt_sha256"}}
         projected.update({
+            "name": f"{recipe_id}.{component['name']}@{strategy_id}",
+            "dimension": component["name"],
             "value": None if component["value"] is None else float(component["value"]),
-            "formula": (
-                f"{receipt['strategy']['strategy_id']}:{component['name']}" if component["in_composite"] else None
-            ),
+            "formula": f"{strategy_id} points" if component["in_composite"] else None,
             "mode": mode,
             "receipt_sha256": component.get("receipt_sha256"),
         })

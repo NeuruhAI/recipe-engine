@@ -69,14 +69,14 @@ def test_consumer_kernel_accepts_and_rehashes_the_score_vector(kernel):
     model = types.ScoreVector.model_validate(vector)
     assert model.content_sha256 == vector["content_sha256"]
     states = {c.name: c.evaluation_state.value for c in model.components}
-    assert states["economic_value"] == "UNKNOWN"
-    assert states["contactability"] == "UNWIRED"
+    assert states["fractional_family_ownership.economic_value@nc_curative_rank.v3"] == "UNKNOWN"
+    assert states["fractional_family_ownership.contactability@nc_curative_rank.v3"] == "UNWIRED"
 
 
 def test_consumer_refuses_an_unknown_dimension_dressed_as_zero(kernel):
     types, _nbe, _vocab = kernel
     vector = to_score_vector(_receipt(), tenant_id="tenant-fixture", universe_id="universe-fixture")
-    economic = next(c for c in vector["components"] if c["name"] == "economic_value")
+    economic = next(c for c in vector["components"] if c["dimension"] == "economic_value")
     economic["value"] = 0.0
     with pytest.raises(Exception, match="LOW_SCORE"):
         types.ScoreVector.model_validate(vector)
@@ -109,6 +109,6 @@ def test_next_best_evidence_plans_over_what_scoring_left_open(kernel):
     gap_text = " ".join(g.expected_information for g in plan.gaps)
     for open_dimension in ("economic_value", "contactability", "liquidity", "evidence_confidence",
                            "strategic_fit", "downside_risk"):
-        assert f"evaluate {open_dimension} " in gap_text
+        assert f"evaluate fractional_family_ownership.{open_dimension}@nc_curative_rank.v3 " in gap_text
     for evaluated in ("signal_strength", "urgency", "data_completeness", "source_independence_diversity"):
-        assert f"evaluate {evaluated} " not in gap_text
+        assert f".{evaluated}@" not in gap_text

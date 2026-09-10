@@ -396,6 +396,9 @@ def test_score_vector_projection_satisfies_the_consumer_contract(canonical):
         (REPO / "tests" / "opportunity_intelligence" / "fixtures" / "lead_recipe_os_score_vector.v1.schema.json").read_text()
     )
     assert set(vector) == set(schema["required"])
+    assert [c["name"] for c in vector["components"]] == [
+        f"heir_property_acquisition_research.{name}@{CANONICAL_STRATEGY_ID}" for name, _owner in SCORE_DIMENSIONS
+    ]
     allowed = set(schema["properties"]["components"]["items"]["properties"]["evaluation_state"]["enum"])
     for component in vector["components"]:
         assert component["evaluation_state"] in allowed
