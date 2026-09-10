@@ -333,6 +333,8 @@ def test_a_found_defeater_decides_and_an_unobserved_one_does_not(compiled):
     found = by_id(run(base_property(pro=probate, closed=closed), compiled))["open_probate_property"]
     assert found["decision"] == "NO_MATCH"
     assert "estate_closed" in found["reason"]
+    assert any(c["outcome"] == "UNKNOWN" for c in found["clauses"] if c["role"] == "QUALIFYING")
+    assert found["next_best_evidence"] == [], "open qualifying items do not matter once membership is excluded"
 
 
 def test_probate_routes_a_pre_probate_death_to_r4(compiled):
@@ -577,3 +579,48 @@ def test_conflicting_measurements_are_unknown(compiled):
     [c] = [c for c in ev["clauses"] if c["clause_id"] == "equity_65"]
     assert (c["outcome"], c["observed_state"]) == ("UNKNOWN", "CONFLICTED")
     assert ev["decision"] == "UNKNOWN"
+
+
+def test_withdrawn_or_stale_evidence_behind_a_measurement_supports_nothing(compiled):
+    for extra, code in (
+        ({"withdrawn_at": "2026-09-05T00:00:00Z"}, "EVIDENCE_WITHDRAWN"),
+        ({"ledger_state": "SOURCE_FAILED", "ledger_ref": None}, "EVIDENCE_UNBOUND"),
+    ):
+        payload = base_property()
+        payload["context"]["evidence"] = [
+            {**e, **extra} if e["evidence_id"] == "avm" else e for e in payload["context"]["evidence"]
+        ]
+        ev = by_id(run(payload, compiled))["code_tax_equity"]
+        [c] = [c for c in ev["clauses"] if c["clause_id"] == "equity_65"]
+        assert (c["outcome"], c["reason_codes"]) == ("UNKNOWN", [code])
+        assert ev["decision"] == "UNKNOWN"
+
+
+def test_no_runtime_loop_calls_the_compiler_so_runtime_call_path_stays_absent():
+    from tests.opportunity_intelligence.test_p1b_runtime_caller_absent import RUNTIME_CANDIDATES
+
+    hits = []
+    for rel in RUNTIME_CANDIDATES:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        for token in ("recipe_compiler", "evaluate_canonical_recipes", "compile_canonical_recipes"):
+            if token in text:
+                hits.append(f"{rel}:{token}")
+    assert hits == []
+
+
+def test_a_lowering_that_changes_the_decision_is_refused(compiled, monkeypatch):
+    from recipe_engine.opportunity_intelligence import recipe_compiler
+
+    real = recipe_compiler.evaluate_eligibility
+
+    class Flipped:
+        def __init__(self, receipt):
+            self._body = receipt.to_dict()
+            self._body["decision"] = "NO_MATCH" if self._body["decision"] != "NO_MATCH" else "MATCH"
+
+        def to_dict(self):
+            return self._body
+
+    monkeypatch.setattr(recipe_compiler, "evaluate_eligibility", lambda ctx, pol: Flipped(real(ctx, pol)))
+    with pytest.raises(RecipeCompilerError, match="the lowering changed the predicate"):
+        run(base_property(), compiled)
