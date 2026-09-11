@@ -69,6 +69,17 @@ from .oppack_receipts import (
     build_why_this_matched,
     build_why_this_ranked,
 )
+from .membership_scoring import (
+    CANONICAL_STRATEGY_ID,
+    RankedUniverse,
+    ReceiptDriftError,
+    ScoringError,
+    load_strategy,
+    rank,
+    score_membership,
+    to_score_vector,
+    validate_membership_score_receipt,
+)
 from .eligibility import (
     CANONICAL_SIGNAL_TYPES,
     DECISIONS,
@@ -91,6 +102,15 @@ from .eligibility import (
 )
 
 __all__ = [
+    "CANONICAL_STRATEGY_ID",
+    "RankedUniverse",
+    "ReceiptDriftError",
+    "ScoringError",
+    "load_strategy",
+    "rank",
+    "score_membership",
+    "to_score_vector",
+    "validate_membership_score_receipt",
     "CANONICAL_SIGNAL_TYPES",
     "DECISIONS",
     "ELIGIBILITY_CONTEXT_CONTRACT",
