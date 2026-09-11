@@ -24,6 +24,10 @@ RECEIPT = ROOT / "artifacts" / "P1B_RUNTIME_CALL_PATH_RECEIPT.json"
 ALLOWED_CALLERS = frozenset({
     "recipe_engine/opportunity_intelligence/eligibility.py",
     "recipe_engine/opportunity_intelligence/__init__.py",
+    # Library, not runtime: the pure recipe compiler lowers exactly-expressible
+    # canonical recipes to eligibility-policy.v1 and asserts decision parity.
+    # No runtime candidate may import it (test_recipe_compiler locks that).
+    "recipe_engine/opportunity_intelligence/recipe_compiler.py",
     "scripts/p1_independent_eligibility_proof.py",
     "scripts/run_independent_eligibility.py",
 })
