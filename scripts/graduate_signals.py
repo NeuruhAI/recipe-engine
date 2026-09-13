@@ -40,6 +40,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from recipe_engine.autonomy.models import AuthorityLevel, ConflictState
+from recipe_engine.db_authority import DatabaseAuthorityError, resolve_database_url
 from recipe_engine.graduation import (
     POLICY_VERSION, GraduationPolicy, GraduationState, PropertyIdentity,
     SignalEvidence, classify,
@@ -117,6 +118,12 @@ def main() -> int:
     ap.add_argument("--identity-receipt", default=None)
     args = ap.parse_args()
     load_env()
+    try:
+        authority = resolve_database_url()
+    except DatabaseAuthorityError as exc:
+        print(f"FATAL: {exc}", file=sys.stderr)
+        return 1
+    print(authority.describe(), file=sys.stderr)
 
     identity_path, identity = newest_identity_receipt(args.identity_receipt)
     by_signal = {r["SIGNAL_ID"]: r for r in identity["results"]}
@@ -124,7 +131,7 @@ def main() -> int:
     policy = GraduationPolicy()
     now = datetime.now(timezone.utc)
 
-    with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row) as conn:
+    with psycopg.connect(authority.dsn, row_factory=dict_row) as conn:
         cur = conn.cursor()
         cur.execute("""
             select listing_id, city, state, postal_code, county_slug, last_seen_at
@@ -192,7 +199,7 @@ def main() -> int:
     }
 
     if args.promote_research and research_rows:
-        with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row) as conn:
+        with psycopg.connect(authority.dsn, row_factory=dict_row) as conn:
             cur = conn.cursor()
             cur.execute("select * from public.data_estate_revise_v1(%s,%s,%s::jsonb)",
                         (run_id, "recipe_engine.graduation.v1", json.dumps(research_rows)))

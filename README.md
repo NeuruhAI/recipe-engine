@@ -40,7 +40,7 @@ cd ~/repos/recipe-engine
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill real values
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/010_recipe_schema.sql
+psql "$DEEDSONAR_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/010_recipe_schema.sql
 ```
 
 ## Run
@@ -52,8 +52,24 @@ python3 run.py               # full pipeline
 python3 run.py --no-engine   # scrape + persist only
 ```
 
-Exit codes: 0 ok · 1 config/env · 2 zero events (parse failure) ·
-3 node fork · 4 engine call failures (run completed, see manifest).
+Exit codes: 0 ok · 1 config/env (including a refused database) · 2 zero
+events (parse failure) · 3 node fork · 4 engine call failures (run completed,
+see manifest) · 5 write targets unready (the resolved database lacks the
+`recipe` unique keys; nothing written).
+
+## Database authority
+
+Every write in this repo resolves through `recipe_engine/db_authority.py`:
+`DEEDSONAR_DATABASE_URL` (DeedSonar production, `efxowqudmsfqjmbeidjc`) wins;
+the legacy-named `DATABASE_URL` is a fallback only. The retired spine
+`lvdimujkfheeyqchjzra` is refused wherever it appears, as is any other
+Supabase project; a loopback host is a local court database. Before the first
+upsert, `run.py` proves the resolved database carries the unique keys its
+`ON CONFLICT` clauses need and exits 5 otherwise.
+
+```bash
+python3 run.py --print-authority   # read-only: which DB, is it write-ready
+```
 
 ## Autonomy core (candidate)
 
