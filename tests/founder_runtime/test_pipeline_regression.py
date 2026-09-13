@@ -28,8 +28,9 @@ PROTECTED = [
 # /api/sale-details endpoint. The tripwire did its job — it caught the change.
 # Everything it guards downstream (canon keys, persist contract, engine call) is
 # unchanged; see recipe_engine/source_api.py and tests/test_source_api.py.
+# run.py re-pinned 2026-09-13 (T4 topology: db authority resolver + write-target preflight, PR #25).
 EXPECTED = {
-    "run.py": "fb5c22096e4c02820d00f941d9541fb0bc6709445a52982a250f33245ed4aedf",
+    "run.py": "4db0684a03a979047741eb7fc042b81b2dead12c6cd86be40ad33e9ea8341adc",
     "recipe_engine/parse.py": "07e57993d1695f6c91df1225dbd15c372625f0fe951761bcea02ce32c95e1f00",
     "recipe_engine/fetch.py": "8d248a3726fb9906f7228b61f452b938ea34247ee5c613697c7b44f3fb81042d",
     "recipe_engine/persist.py": "3af9deb40a6326185f6ffc8e0fc16ec2464c2ceb83bec5b39fa7ab75962154dc",
