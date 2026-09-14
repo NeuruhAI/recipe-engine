@@ -858,12 +858,18 @@ class MissionRuntime:
         the founder to have signed the wrong one of.
         """
         published = self.published_authorization_request(mission_id)
-        if published is not None and published.get("scope_key") == request.get("scope_key"):
+        if (
+            published is not None
+            and published.get("scope_key") == request.get("scope_key")
+            and published.get("source_sha") == request.get("source_sha")
+        ):
             return published
+        # The dedupe key names the source SHA too: the same scope re-published
+        # for a new runtime build is a new request, not a replay of the old one.
         self._record_same_state_event(
             mission_id, EventType.GOVERNANCE_RECORDED, "authorization_request_published",
             {self.AUTHORIZATION_REQUEST_KEY: dict(request)},
-            f"authz-request:{request['scope_key']}",
+            f"authz-request:{request['scope_key']}:{request.get('source_sha') or ''}",
             evidence_refs=[str(request["scope_key"])],
         )
         return dict(request)

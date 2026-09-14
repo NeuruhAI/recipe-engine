@@ -49,6 +49,10 @@ from recipe_engine.founder_runtime.missions.long_horizon import (
     GOV_APPROVAL_REF_PREFIX,
     governance_approval_from,
 )
+
+# Condition recorded on a gate ALLOW whose Governance artifact was minted late,
+# naming the earlier artifact-less record of the same decision it binds.
+GOV_ARTIFACT_LATE_BOUND_PREFIX = "governance_artifact_late_bound_for:"
 from recipe_engine.founder_runtime.runtime import approval_resolver as resolver
 from recipe_engine.founder_runtime.runtime.approvals import assert_approval_usable, gated_action_for
 from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
@@ -675,6 +679,7 @@ class MissionService:
             else:
                 requested_action = f"plan_decision:{decision.value}"
                 scope = mission.plan_id or mission_id
+            same_decision: list[Approval] = []
             for existing in self.runtime.store.list_approvals(mission_id):
                 if existing.decision not in (ApprovalDecision.ALLOW, ApprovalDecision.DENY):
                     continue
@@ -682,18 +687,39 @@ class MissionService:
                     continue
                 if (existing.decision == decision
                         and existing.exact_requested_action == requested_action):
-                    # Identical semantic replay: return the existing terminal decision.
-                    body = self._envelope(self._get(mission_id), receipt_id=existing.approval_id,
-                                          evidence_refs=[existing.approval_id])
-                    return {"envelope": body, "approval": existing.to_dict(),
-                            "authority_state": existing.decision.value,
-                            "executed": False, "idempotent_replay": True,
-                            "note": "approval already recorded; plan NOT executed (no mutation authority in V1)"}
+                    same_decision.append(existing)
+                    continue
                 raise ApiError(409, "DECISION_CONFLICT",
                                "a terminal authority decision already exists for this "
                                "mission/plan/scope; conflicting decisions are refused",
                                {"existing_decision": existing.decision.value,
                                 "approval_id": existing.approval_id})
+            # Identical semantic replay: the decision stands, exactly once. The one
+            # thing a repeated gate ALLOW may add is the Governance artifact that a
+            # decision recorded BEFORE the mission published its authorization
+            # request could never carry: Governance was not yet answering
+            # founder_required for it (an expired ratification parks the mission
+            # as unresolved and publishes nothing), so there was no scope_key to
+            # bind a signature to, and the latch then replayed that artifact-less
+            # record forever -- the founder's decision existed but could never be
+            # presented. Late binding mints the missing artifact against the
+            # request the mission has SINCE published, bound to the same scope,
+            # source SHA and tier Governance named. The decision never changes and
+            # is never stacked: with no publication, no signer, or an artifact
+            # already bound, the existing record is returned exactly as before.
+            late_bind_source: Approval | None = None
+            if same_decision:
+                bound = [a for a in same_decision if governance_approval_from(a) is not None]
+                can_late_bind = (
+                    not bound
+                    and gate
+                    and decision == ApprovalDecision.ALLOW
+                    and self.signer.configured
+                    and self.runtime.published_authorization_request(mission_id) is not None
+                )
+                if not can_late_bind:
+                    return self._replay_decision(mission_id, bound[0] if bound else same_decision[0])
+                late_bind_source = same_decision[0]
             if mission.current_state not in (MissionState.AWAITING_APPROVAL, MissionState.BLOCKED_POLICY):
                 raise ApiError(409, "NOT_AWAITING_APPROVAL",
                                "mission is not awaiting an approval decision",
@@ -736,6 +762,13 @@ class MissionService:
                 )
                 if signed_note is not None:
                     evidence_refs.append(signed_note)
+            conditions = [reason] if reason else []
+            if late_bind_source is not None:
+                if signed_note is None:
+                    # The published request does not match this gate (or the signer
+                    # refused): nothing new can be bound, so nothing new is recorded.
+                    return self._replay_decision(mission_id, late_bind_source)
+                conditions.append(GOV_ARTIFACT_LATE_BOUND_PREFIX + late_bind_source.approval_id)
             approval = Approval(
                 schema_version=SCHEMA_APPROVAL,
                 approval_id=new_uuid("appr"),
@@ -746,7 +779,7 @@ class MissionService:
                 requested_by="founder",
                 decided_by="jeramie",
                 decision=decision,
-                conditions=[reason] if reason else [],
+                conditions=conditions,
                 expiry=None,
                 evidence_refs=evidence_refs,
                 created_at=now,
@@ -774,6 +807,15 @@ class MissionService:
                       "note": "approval recorded; plan NOT executed (no mutation authority in V1)"}
             self._idem_store(idempotency_key, request_hash, result)
             return result
+
+    def _replay_decision(self, mission_id: str, existing: Approval) -> dict[str, Any]:
+        """Return the terminal decision already recorded for this scope, unchanged."""
+        body = self._envelope(self._get(mission_id), receipt_id=existing.approval_id,
+                              evidence_refs=[existing.approval_id])
+        return {"envelope": body, "approval": existing.to_dict(),
+                "authority_state": existing.decision.value,
+                "executed": False, "idempotent_replay": True,
+                "note": "approval already recorded; plan NOT executed (no mutation authority in V1)"}
 
     def _mint_gate_artifact(
         self,
@@ -946,17 +988,25 @@ class MissionService:
         # 3. An externally decided ALLOW (the founder, over the gate route). It
         #    is never spent on its own say-so: its SIGNED artifact is presented
         #    to Governance, and only Governance's allow spends it.
+        #    Of the usable human decisions, the one carrying a signed artifact is
+        #    the one Governance can verify; an earlier artifact-less record of the
+        #    same decision (recorded before the request was published) is not
+        #    preferred merely for being first.
         external = None
         for existing in approvals:
             if resolver.is_governance_decided(existing):
                 continue
-            if (
+            if not (
                 self._usable(existing, mission_id=mission_id, action=action, scope=scope, now=now)
                 and (
                     mission.work_spec_sha256 is None
                     or resolver.bound_work_spec_sha256(existing) == mission.work_spec_sha256
                 )
             ):
+                continue
+            if external is None:
+                external = existing
+            if governance_approval_from(existing) is not None:
                 external = existing
                 break
         founder_approval = governance_approval_from(external) if external is not None else None
@@ -1019,7 +1069,18 @@ class MissionService:
             # Publish what the founder's signature must bind to, unless the
             # mission already published its own request (a long-horizon
             # mission is its own publisher; never overwrite it).
-            if self.runtime.published_authorization_request(mission_id) is None and res.scope_key:
+            # An api-mode publication that names a source SHA this runtime no
+            # longer attests (the supervised pin moved under a parked mission)
+            # is stale: a signature bound to it can only ever be refused
+            # APPROVAL_SOURCE_MISMATCH, so the request is published again for
+            # the SHA that will actually present it.
+            published = self.runtime.published_authorization_request(mission_id)
+            stale_api_publication = (
+                published is not None
+                and published.get("mode") == "api"
+                and published.get("source_sha") != self.attested_source_sha
+            )
+            if (published is None or stale_api_publication) and res.scope_key:
                 self.runtime.record_authorization_request(mission_id, {
                     "mission_id": mission_id,
                     "action": action,
