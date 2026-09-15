@@ -90,6 +90,12 @@ class MissionEnvelopeBody(BaseModel):
     blocked_actions: list[str]
     freshness: FreshnessBody
     receipt_id: str
+    # Lineage and completion (governed completion + continuation). Optional so
+    # every pre-existing envelope keeps its exact shape.
+    parent_mission_id: str | None = None
+    lineage: dict[str, Any] | None = None
+    completion: dict[str, Any] | None = None
+    continuation: dict[str, Any] | None = None
 
 
 class MissionListResponse(BaseModel):
@@ -107,6 +113,11 @@ class CreateMissionBody(BaseModel):
     title: str = Field(default="", max_length=500)
     done_criteria: str = Field(default="", max_length=4000)
     work_spec: WorkSpecBody | None = None
+    # What this mission wants next once it is verifiably complete
+    # (fr.continuation_plan.v1 request: objective, done_criteria, work_spec,
+    # optional nested continuation). Validated by the service, which owns the
+    # exact vocabulary; the child passes its own Governance gate when scheduled.
+    continuation: dict[str, Any] | None = None
 
 
 class DecisionBody(BaseModel):
@@ -194,6 +205,7 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
             service.create_mission, objective=body.objective, title=body.title,
             done_criteria=body.done_criteria,
             work_spec=body.work_spec.model_dump(by_alias=True) if body.work_spec is not None else None,
+            continuation=body.continuation,
             idempotency_key=key)
 
     @app.get(
@@ -347,6 +359,24 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
         key = _idem_key(idempotency_key)
         return await run_in_threadpool(
             service.record_execution_outcome, mission_id, body=body,
+            idempotency_key=key, expected_version=x_expected_version)
+
+    # ---- governed completion (RECONCILING -> COMPLETED) --------------------
+    # The ONE route through which an executed, independently judged mission
+    # completes. The caller sends the full sealed Sentinel record whose digest
+    # the runtime accepted with COURT_PASSED; the kernel re-verifies it, derives
+    # the live_observed receipt, acceptance and verified outcome from the
+    # mission's own chain, and asks the canonical completion verifier. A
+    # declared continuation is then scheduled as an ordinary gated mission.
+    # Never executes, never authorises: completion binds what the gate allowed
+    # and the court judged.
+    @app.post("/v1/missions/{mission_id}/reconcile", dependencies=[Depends(require_auth)])
+    async def reconcile(mission_id: str, body: dict[str, Any],
+                        idempotency_key: str | None = Header(default=None),
+                        x_expected_version: int | None = Header(default=None)):
+        key = _idem_key(idempotency_key)
+        return await run_in_threadpool(
+            service.reconcile_mission, mission_id, body=body,
             idempotency_key=key, expected_version=x_expected_version)
 
     @app.get("/v1/missions/{mission_id}/replay", dependencies=[Depends(require_auth)])

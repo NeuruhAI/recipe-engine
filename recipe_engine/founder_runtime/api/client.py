@@ -92,6 +92,7 @@ class FounderRuntimeClient:
     # writes
     def create_mission(self, objective: str, *, title: str = "", done_criteria: str = "",
                        work_spec: Mapping[str, Any] | None = None,
+                       continuation: Mapping[str, Any] | None = None,
                        idempotency_key: str | None = None) -> dict:
         body: dict[str, Any] = {
             "objective": objective,
@@ -100,6 +101,8 @@ class FounderRuntimeClient:
         }
         if work_spec is not None:
             body["work_spec"] = dict(work_spec)
+        if continuation is not None:
+            body["continuation"] = dict(continuation)
         return self._req("POST", "/v1/missions",
                          body=body,
                          idempotency_key=idempotency_key or self._key())
@@ -166,6 +169,19 @@ class FounderRuntimeClient:
                 "execution_outcome", body.get("execution_id"), body.get("outcome"),
                 receipt.get("receipt_sha") or court.get("record_sha") or ""))
         return self._req("POST", f"/v1/missions/{mission_id}/execution-outcomes", body=dict(body),
+                         idempotency_key=idempotency_key, expected_version=expected_version)
+
+    # Governed completion: ``body`` is an fr.reconcile_request.v1 carrying the
+    # full sealed court record. Default key = the evidence identity, so a
+    # retried reconcile of the same evidence is a replay by construction.
+    def reconcile(self, mission_id: str, body: Mapping[str, Any], *,
+                  idempotency_key: str | None = None,
+                  expected_version: int | None = None) -> dict:
+        if idempotency_key is None:
+            record = body.get("court_record") or {}
+            idempotency_key = ":".join(str(part) for part in (
+                "reconcile", body.get("execution_id"), record.get("court_id") or ""))
+        return self._req("POST", f"/v1/missions/{mission_id}/reconcile", body=dict(body),
                          idempotency_key=idempotency_key, expected_version=expected_version)
 
     def stream_events(self, mission_id: str, *, after: int | str | None = None,
