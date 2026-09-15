@@ -39,9 +39,14 @@ from recipe_engine.founder_runtime.contracts.events import EventType
 from recipe_engine.founder_runtime.contracts.mission import Mission
 from recipe_engine.founder_runtime.contracts.work_spec import validate_work_spec_request
 from recipe_engine.founder_runtime.errors import (
-    ApprovalRequired, AuthorityDenied, ExecutionOutcomeMalformed, ExecutionOutcomeRejected,
-    FounderRuntimeError, MissionNotFound,
-    MissionSchemaInvalid, PersistenceConflict, StateTransitionInvalid,
+    ApprovalRequired, AuthorityDenied, CompletionCriteriaFailed, ExecutionOutcomeMalformed,
+    ExecutionOutcomeRejected, FounderRuntimeError, MissionNotFound,
+    MissionSchemaInvalid, PersistenceConflict, ReceiptInvalid, ReconcileMalformed,
+    ReconcileRejected, StateTransitionInvalid,
+)
+from recipe_engine.founder_runtime.evidence.reconciliation import (
+    CONTINUATION_KEY_PREFIX, build_lineage, continuation_creation_key, validate_continuation_plan,
+    verify_continuation_plan,
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
 from recipe_engine.founder_runtime.ids import hash_payload, new_uuid, stable_id
@@ -81,7 +86,7 @@ _ALLOWED_NEXT = {
     "QUEUED": ["get", "pause", "cancel"],
     "EXECUTING": ["get", "pause", "cancel"],
     "VERIFYING": ["get", "pause", "cancel"],
-    "RECONCILING": ["get", "pause", "cancel"],
+    "RECONCILING": ["get", "reconcile", "pause", "cancel"],
     "PAUSED": ["get", "resume", "cancel", "recover"],
     "RECOVERING": ["get", "recover", "cancel"],
     "FAILED_RETRYABLE": ["get", "recover", "cancel"],
@@ -217,6 +222,18 @@ class MissionService:
         receipts = self.runtime.store.list_receipts(mission.mission_id)
         rid = receipt_id or (receipts[-1].receipt_id if receipts else None) or stable_id(
             "env", mission.mission_id, mission.version, mission.current_state.value)
+        extensions = mission.extensions or {}
+        lineage = extensions.get("lineage") if isinstance(extensions.get("lineage"), dict) else None
+        plan = extensions.get("continuation_plan") if isinstance(extensions.get("continuation_plan"), dict) else None
+        continuation = None
+        if plan is not None:
+            key = continuation_creation_key(mission.mission_id, str(plan.get("plan_sha256") or ""))
+            child = self._continuation_child(mission.mission_id, key)
+            continuation = {
+                "plan_sha256": plan.get("plan_sha256"),
+                "creation_key": key,
+                "child_mission_id": child.mission_id if child is not None else None,
+            }
         return {
             "api_version": API_VERSION,
             "runtime_version": RUNTIME_VERSION,
@@ -232,6 +249,15 @@ class MissionService:
             "blocked_actions": list(_BLOCKED_ALWAYS),
             "freshness": {"observed_at": self.clock.now_iso(), "stale": False},
             "receipt_id": rid,
+            # Lineage: a continuation child names the completed parent it
+            # continues. Deliberately NOT surfaced as `parent_mission_id`: the
+            # workers bridge reads that field as "resume this parent's waiting
+            # jobs", which a COMPLETED parent must never have done on its behalf.
+            "lineage": lineage,
+            "completion": ({"completion_hash": extensions.get("completion_hash"),
+                            "outcome_ref": extensions.get("outcome_ref")}
+                           if extensions.get("completion_hash") else None),
+            "continuation": continuation,
         }
 
     # ---- helpers ----
@@ -522,7 +548,32 @@ class MissionService:
     # ---- public operations ----
     def create_mission(self, *, objective: str, title: str = "", done_criteria: str = "",
                        work_spec: Mapping[str, Any] | None = None,
+                       continuation: Mapping[str, Any] | None = None,
                        idempotency_key: str, expected_version: int | None = None) -> dict[str, Any]:
+        if idempotency_key.startswith(CONTINUATION_KEY_PREFIX):
+            # Continuation children are created by the runtime under a key derived
+            # from their parent; a caller claiming one would squat the child's slot.
+            raise ApiError(422, "IDEMPOTENCY_KEY_RESERVED",
+                           "the continuation idempotency namespace is reserved for the runtime",
+                           {"prefix": CONTINUATION_KEY_PREFIX})
+        plan = None
+        if continuation is not None:
+            if work_spec is None:
+                raise ApiError(422, "CONTINUATION_INVALID",
+                               "only an executable (work-spec) mission can declare a continuation", {})
+            try:
+                plan = validate_continuation_plan(continuation)
+            except MissionSchemaInvalid as exc:
+                raise ApiError(422, "CONTINUATION_INVALID", exc.message, exc.details) from exc
+        return self._create_mission_impl(objective=objective, title=title, done_criteria=done_criteria,
+                                         work_spec=work_spec, continuation_plan=plan, lineage=None,
+                                         idempotency_key=idempotency_key)
+
+    def _create_mission_impl(self, *, objective: str, title: str, done_criteria: str,
+                             work_spec: Mapping[str, Any] | None,
+                             continuation_plan: Mapping[str, Any] | None,
+                             lineage: Mapping[str, Any] | None,
+                             idempotency_key: str) -> dict[str, Any]:
         try:
             normalized_work_spec = (
                 validate_work_spec_request(work_spec) if work_spec is not None else None
@@ -536,6 +587,13 @@ class MissionService:
         }
         if normalized_work_spec is not None:
             request_material["work_spec"] = normalized_work_spec
+        extra_extensions: dict[str, Any] = {}
+        if continuation_plan is not None:
+            request_material["continuation_plan_sha256"] = continuation_plan["plan_sha256"]
+            extra_extensions["continuation_plan"] = dict(continuation_plan)
+        if lineage is not None:
+            request_material["lineage_sha256"] = lineage["lineage_sha256"]
+            extra_extensions["lineage"] = dict(lineage)
         request_hash = hash_payload(request_material)
         cached = self._idem_lookup(idempotency_key, request_hash)
         if cached is not None:
@@ -549,6 +607,7 @@ class MissionService:
                     request_text,
                     creation_idempotency_key=idempotency_key,
                     work_spec=normalized_work_spec,
+                    extra_extensions=extra_extensions or None,
                 )
             except PersistenceConflict as exc:
                 raise ApiError(
@@ -557,6 +616,19 @@ class MissionService:
                     "mission creation idempotency key was reused for different material",
                     {"key": idempotency_key},
                 ) from exc
+            # The store's creation identity is request-only (objective, work spec);
+            # a retried key must also carry the same continuation and lineage.
+            stored_ext = mission.extensions or {}
+            for key, wanted in extra_extensions.items():
+                if stored_ext.get(key) != wanted:
+                    raise ApiError(409, "IDEMPOTENCY_CONFLICT",
+                                   "mission creation idempotency key was reused for different material",
+                                   {"key": idempotency_key, "field": key})
+            for key in ("continuation_plan", "lineage"):
+                if key not in extra_extensions and stored_ext.get(key) is not None:
+                    raise ApiError(409, "IDEMPOTENCY_CONFLICT",
+                                   "mission creation idempotency key was reused for different material",
+                                   {"key": idempotency_key, "field": key})
             mid = mission.mission_id
             result: dict[str, Any]
             if existing is not None:
@@ -1362,6 +1434,129 @@ class MissionService:
             }
             self._idem_store(idempotency_key, request_hash, response)
             return response
+
+    # ---- governed completion + continuation -----------------------------------
+    def reconcile_mission(self, mission_id: str, *, body: Mapping[str, Any],
+                          idempotency_key: str, expected_version: int | None = None) -> dict[str, Any]:
+        """RECONCILING -> COMPLETED on verified execution evidence, then schedule
+        the continuation the mission declared.
+
+        The body carries the one thing the runtime cannot hold itself: the full
+        sealed Sentinel record whose digest it accepted with COURT_PASSED. The
+        kernel rebuilds everything else from the mission's own chain. Idempotent
+        twice over, like the execution-outcome route: an exact replay returns the
+        stored response, and a COMPLETED mission offered the same evidence is a
+        kernel replay (which also re-ensures its continuation exists).
+        """
+        with self._lock:
+            mission = self._get(mission_id)
+            self._assert_not_corrupted(mission_id)
+            if not isinstance(body, Mapping):
+                raise ApiError(400, "RECONCILE_MALFORMED", "reconcile body must be an object", {})
+            try:
+                request_hash = hash_payload({"route": "reconcile", "mission_id": mission_id,
+                                             "body": dict(body)})
+            except TypeError as exc:
+                raise ApiError(400, "RECONCILE_MALFORMED", "reconcile body is not canonical JSON",
+                               {"cause": str(exc)[:200]}) from exc
+            cached = self._idem_lookup(idempotency_key, request_hash)
+            if cached is not None:
+                cached["idempotent_replay"] = True
+                cached["applied"] = False
+                cached["events_appended"] = []
+                return cached
+            if expected_version is not None:
+                self._assert_version(mission, expected_version)
+            try:
+                result = self.runtime.reconcile_execution(mission_id, body)
+            except ReconcileMalformed as e:
+                raise ApiError(400, "RECONCILE_MALFORMED", e.message, dict(e.details)) from e
+            except ReconcileRejected as e:
+                raise ApiError(409, e.reason_code, e.message, dict(e.details)) from e
+            except MissionNotFound as e:
+                raise ApiError(404, "MISSION_NOT_FOUND", "mission not found", {"mission_id": mission_id}) from e
+            except (CompletionCriteriaFailed, ReceiptInvalid, MissionSchemaInvalid) as e:
+                raise ApiError(409, "COMPLETION_REFUSED", e.message, dict(e.details)) from e
+            except (StateTransitionInvalid, PersistenceConflict) as e:
+                raise ApiError(409, "STATE_TRANSITION_INVALID", str(e), dict(e.details)) from e
+            continuation = None
+            if result["state_after"] == MissionState.COMPLETED.value:
+                try:
+                    continuation = self._schedule_continuation(self._get(mission_id))
+                except ApiError as e:
+                    # Completion stands on its own evidence; a continuation that
+                    # could not be scheduled is reported and retried, never undone.
+                    continuation = {"scheduled": False, "code": e.code, "message": e.message,
+                                    "details": e.details}
+            response = {
+                "envelope": self._envelope(self._get(mission_id)),
+                **result,
+                "verified": True,
+                "continuation": continuation,
+                "note": ("mission completed by the canonical completion verifier on the accepted "
+                         "execution receipt and the independently sealed court record"),
+            }
+            if continuation is None or continuation.get("scheduled") is True:
+                self._idem_store(idempotency_key, request_hash, response)
+            return response
+
+    def _continuation_child(self, parent_mission_id: str, key: str) -> Mission | None:
+        """The mission under a continuation key, only if it really continues this parent."""
+        child = self.runtime.store.get_mission_by_creation_key(key)
+        if child is None:
+            return None
+        lineage = (child.extensions or {}).get("lineage")
+        if not isinstance(lineage, dict) or lineage.get("parent_mission_id") != parent_mission_id:
+            return None
+        return child
+
+    def _schedule_continuation(self, parent: Mission) -> dict[str, Any] | None:
+        """Create the continuation a verifiably COMPLETED mission declared.
+
+        The child is an ordinary mission: it passes its own decision pipeline and
+        its own Governance gate (auto-resolved exactly like any create), so a
+        continuation inherits lineage, never authority. Deterministic creation
+        key: scheduling twice is one child.
+        """
+        plan_raw = (parent.extensions or {}).get("continuation_plan")
+        if plan_raw is None:
+            return None
+        if parent.current_state != MissionState.COMPLETED:
+            raise ApiError(409, "CONTINUATION_PARENT_NOT_COMPLETED",
+                           "a continuation is scheduled only from a completed mission",
+                           {"state": parent.current_state.value})
+        try:
+            plan = verify_continuation_plan(plan_raw)
+        except ReconcileRejected as e:
+            raise ApiError(409, e.reason_code, e.message, dict(e.details)) from e
+        completion = self.runtime.store.get_completion(parent.mission_id)
+        outcome = (self.runtime.outcome_record(completion.outcome_ref, parent.mission_id)
+                   if completion is not None and completion.outcome_ref else None)
+        if completion is None or outcome is None:
+            raise ApiError(409, "CONTINUATION_PARENT_UNVERIFIED",
+                           "completed parent carries no completion report and outcome", {})
+        lineage = build_lineage(parent, completion=completion.to_dict(), outcome=outcome, plan=plan)
+        key = continuation_creation_key(parent.mission_id, plan["plan_sha256"])
+        squatter = self.runtime.store.get_mission_by_creation_key(key)
+        if squatter is not None and self._continuation_child(parent.mission_id, key) is None:
+            raise ApiError(409, "CONTINUATION_KEY_SQUATTED",
+                           "a mission without this parent's lineage holds the continuation key",
+                           {"creation_key": key, "mission_id": squatter.mission_id})
+        created = self._create_mission_impl(
+            objective=plan["objective"], title="", done_criteria=plan["done_criteria"],
+            work_spec=plan["work_spec"], continuation_plan=plan.get("continuation"),
+            lineage=lineage, idempotency_key=key)
+        envelope = created["envelope"]
+        return {
+            "scheduled": True,
+            "idempotent_replay": bool(created.get("idempotent_replay")),
+            "creation_key": key,
+            "child_mission_id": envelope["mission_id"],
+            "child_state": envelope["state"],
+            "child_version": envelope["version"],
+            "lineage_sha256": lineage["lineage_sha256"],
+            "authority_resolution": created.get("authority_resolution"),
+        }
 
     def _recover_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)

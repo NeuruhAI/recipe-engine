@@ -57,6 +57,9 @@ class ErrorCode(str, Enum):
     # R02D execution-outcome write-back
     EXECUTION_OUTCOME_MALFORMED = "EXECUTION_OUTCOME_MALFORMED"
     EXECUTION_OUTCOME_REJECTED = "EXECUTION_OUTCOME_REJECTED"
+    # Governed completion of an executed mission (fr.reconcile_request.v1)
+    RECONCILE_MALFORMED = "RECONCILE_MALFORMED"
+    RECONCILE_REJECTED = "RECONCILE_REJECTED"
 
 
 class FounderRuntimeError(Exception):
@@ -265,4 +268,25 @@ class ExecutionOutcomeRejected(FounderRuntimeError):
     def __init__(self, reason_code: str, message: str, details: dict[str, Any] | None = None):
         merged = {"reason_code": reason_code, **(details or {})}
         super().__init__(ErrorCode.EXECUTION_OUTCOME_REJECTED, message, merged)
+        self.reason_code = reason_code
+
+
+class ReconcileMalformed(FounderRuntimeError):
+    """The reconcile request is outside the exact fr.reconcile_request.v1 shape (HTTP 400)."""
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.RECONCILE_MALFORMED, message, details)
+
+
+class ReconcileRejected(FounderRuntimeError):
+    """Well-formed reconcile evidence that does not complete this mission (HTTP 409).
+
+    ``reason_code`` names the precise refusal (COURT_RECORD_MISMATCH,
+    NOT_RECONCILING, CUSTODY_EVIDENCE_REQUIRED, ...). Nothing is appended on a
+    refusal: the mission stays exactly where the evidence left it.
+    """
+
+    def __init__(self, reason_code: str, message: str, details: dict[str, Any] | None = None):
+        merged = {"reason_code": reason_code, **(details or {})}
+        super().__init__(ErrorCode.RECONCILE_REJECTED, message, merged)
         self.reason_code = reason_code

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import Any, Mapping
 
@@ -15,7 +16,7 @@ from recipe_engine.founder_runtime.contracts.work_spec import WorkSpec
 from recipe_engine.founder_runtime.state.states import MissionState
 from recipe_engine.founder_runtime.ids import new_uuid, hash_payload, stable_id
 from recipe_engine.founder_runtime.adapters.fixture_iar import FixtureIAR
-from .deliverables import system_status_deliverables
+from .deliverables import execution_deliverables, system_status_deliverables
 from .constraints import (
     AuthorityEnvelope,
     DEFAULT_CONSTRAINTS,
@@ -41,6 +42,12 @@ _DOMAIN_BY_CLASS = {
 # Mission-level evidence every compiled mission owes, independent of its
 # deliverables.  A mission that cannot produce these cannot be completed.
 _BASE_REQUIRED_EVIDENCE = ("execution_receipts", "replay_projection", "authority_classification")
+
+# Extension keys a caller of the compiler may supply: the continuation a mission
+# declares for after its verified completion, and the lineage a continuation
+# child carries back to its completed parent. Both are composed by the runtime
+# service, never by a model, and both land in the hash-chained creation event.
+CALLER_EXTENSION_KEYS: tuple[str, ...] = ("continuation_plan", "lineage")
 
 
 def _bind_work_spec_consequence(requirements: list[Any], work_spec: WorkSpec | None) -> list[Any]:
@@ -136,7 +143,15 @@ def compile_intent_to_mission(
     iar: FixtureIAR | None = None,
     envelope: AuthorityEnvelope = AuthorityEnvelope.READ_ONLY_FIXTURE,
     work_spec: Mapping[str, Any] | None = None,
+    extra_extensions: Mapping[str, Any] | None = None,
 ) -> tuple[Mission, dict[str, Any]]:
+    # Only the lineage/continuation material the runtime itself composes may ride
+    # into a mission body; everything else in extensions is compiler-owned.
+    extras = dict(extra_extensions or {})
+    unknown_extensions = sorted(set(extras) - set(CALLER_EXTENSION_KEYS))
+    if unknown_extensions:
+        raise MissionSchemaInvalid("mission extensions are runtime-owned",
+                                   {"unknown": unknown_extensions})
     principal = principal or Principal.jeramie_fixture()
     if principal.principal_id != "jeramie":
         # P1 only supports fixture principal jeramie
@@ -184,6 +199,10 @@ def compile_intent_to_mission(
     extraction = extract_with_provenance(request_text, envelope=envelope)
     mission_id = new_uuid("msn")
     canonical_work_spec = WorkSpec.create(mission_id, work_spec) if work_spec is not None else None
+    if canonical_work_spec is not None and deliverables:
+        # An executable mission delivers its executed, judged work spec -- not the
+        # system-status fixture report, which no execution evidence speaks to.
+        deliverables = execution_deliverables()
     authority_requirements = _bind_work_spec_consequence(
         classify_authority(request_text, canonical_action=intent),
         canonical_work_spec,
@@ -201,6 +220,8 @@ def compile_intent_to_mission(
     extensions["iar_candidate_strategy_hints"] = list(interpretation.get("candidate_strategy_hints") or [])
     extensions["constraint_provenance"] = [dict(p) for p in extraction.provenance]
     extensions["authority_envelope"] = envelope.value
+    for key, value in (extras or {}).items():
+        extensions[key] = json.loads(json.dumps(value, sort_keys=True))
 
     mission = Mission(
         schema_version=SCHEMA_MISSION,
