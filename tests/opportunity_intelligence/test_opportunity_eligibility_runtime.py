@@ -340,6 +340,29 @@ def test_the_run_receipt_binds_input_outputs_code_schema_time_and_parent(tmp_pat
         assert sha(run_dir / name) == sha(again / name)
 
 
+def test_the_estate_producer_receipt_is_a_parent_only_when_it_binds_the_input(tmp_path):
+    input_csv = write_csv(tmp_path / "input.csv", fixture_rows())
+    input_sha = sha(input_csv)
+    producer = tmp_path / "PRODUCER_RECEIPT.json"
+    body = {"producer_run_id": "estate-run-x", "producer_version": "landos-engine/estate-producer@1",
+            "universe": {"contract": "landos.full-universe-ranking-input.v2", "output": {"sha256": input_sha}}}
+    producer.write_text(json.dumps(body))
+    code, run_dir = evaluate_cli(tmp_path, input_csv, parent_receipt=str(producer))
+    assert code == 0
+    receipt = json.loads((run_dir / runtime.RUN_RECEIPT_FILE).read_text())
+    assert receipt["parent_receipt"]["kind"] == "estate_producer_receipt"
+    assert receipt["parent_receipt"]["declares_input_sha256"] == input_sha
+    assert receipt["input"]["contract"] == "landos.full-universe-ranking-input.v2"
+    assert receipt["input"]["contract_basis"] == "parent_receipt"
+    assert receipt["schema_versions"]["source_contract"] == "landos.full-universe-ranking-input.v2"
+    for broken in ({**body, "universe": {**body["universe"], "output": {"sha256": "0" * 64}}},
+                   {**body, "universe": {**body["universe"], "contract": "landos.something-else.v9"}},
+                   {"producer_run_id": "estate-run-x"}):
+        producer.write_text(json.dumps(broken))
+        code, _ = evaluate_cli(tmp_path, input_csv, out="refused", parent_receipt=str(producer))
+        assert code == 2
+
+
 def test_a_ranking_run_that_did_not_consume_the_input_is_refused(tmp_path):
     input_csv = write_csv(tmp_path / "input.csv", fixture_rows())
     code, _ = evaluate_cli(tmp_path, input_csv, ranking_run_id="ranking_run_20260914_98c6e952f36d")

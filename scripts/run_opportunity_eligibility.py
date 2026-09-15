@@ -61,6 +61,11 @@ from recipe_engine.opportunity_intelligence.recipe_compiler import (  # noqa: E4
 from scripts.rank_nc_curative_raw_v2 import strict_fragmented, strict_heir  # noqa: E402
 
 SOURCE_CONTRACT = "t6.full-universe-ranking-input.v1"
+#: The same 50-column ranker input under the two names its producers stamp: the T6 lane's
+#: full-universe assembler (v1) and the landos-engine estate producer's universe step (v2).
+#: The column court (REQUIRED_COLUMNS, RANKED_OUTPUT_COLUMNS) is what admits a file; the
+#: parent receipt is what names it.
+SOURCE_CONTRACTS = (SOURCE_CONTRACT, "landos.full-universe-ranking-input.v2")
 CROSSWALK_VERSION = "neuruh.recipe-engine.nc-estate-eligibility-crosswalk.v1"
 DEFAULT_UNIVERSE_ID = "deedsonar.nc-curative-estate"
 DEFAULT_VALIDITY_SECONDS = 7 * 24 * 3600  # the estate's weekly source cadence (nc-weekly)
@@ -387,14 +392,32 @@ def load_input(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
 
 
 def _parent_block(parent: Path | None, input_sha: str) -> dict[str, Any] | None:
+    """The receipt that produced --input. It must declare this input's sha256.
+
+    Two shapes are courted: the T6 full-universe input receipt (``output.sha256``) and the
+    landos-engine estate producer receipt (``universe.output.sha256``). A parent that names
+    no input, names another input, or names an uncourted contract is refused: a receipt
+    that does not bind the input is not its parent."""
     if parent is None:
         return None
     body = json.loads(parent.read_text(encoding="utf-8"))
-    declared = (body.get("output") or {}).get("sha256")
-    if declared is not None and declared != input_sha:
-        raise RuntimeRefusal(f"parent receipt output.sha256 {declared} != input sha256 {input_sha}")
-    return {"path": str(parent), "sha256": sha256_file(parent), "contract": body.get("contract"),
-            "declares_input_sha256": declared}
+    universe = body.get("universe") if isinstance(body.get("universe"), dict) else {}
+    if (body.get("output") or {}).get("sha256"):
+        kind, declared, contract = "full_universe_input_receipt", body["output"]["sha256"], body.get("contract")
+    elif (universe.get("output") or {}).get("sha256"):
+        kind, declared, contract = "estate_producer_receipt", universe["output"]["sha256"], universe.get("contract")
+    else:
+        raise RuntimeRefusal(f"parent receipt {parent.name} declares no input sha256")
+    if declared != input_sha:
+        raise RuntimeRefusal(f"parent receipt declares input {declared} != input sha256 {input_sha}")
+    if contract not in SOURCE_CONTRACTS:
+        raise RuntimeRefusal(f"parent receipt names source contract {contract!r}; courted: {list(SOURCE_CONTRACTS)}")
+    block = {"path": str(parent), "sha256": sha256_file(parent), "kind": kind, "contract": contract,
+             "declares_input_sha256": declared}
+    for key in ("producer_run_id", "producer_version"):
+        if body.get(key):
+            block[key] = body[key]
+    return block
 
 
 def evaluate(args: argparse.Namespace) -> dict[str, Any]:
@@ -465,14 +488,16 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         validity_seconds=args.validity_seconds,
         generated_at=_utc_now(),
         input_block={"path": str(input_path), "sha256": input_sha, "rows_in_file": rows_in_file,
-                     "properties_evaluated": len(rows), "contract": SOURCE_CONTRACT,
+                     "properties_evaluated": len(rows),
+                     "contract": parent["contract"] if parent else SOURCE_CONTRACT,
+                     "contract_basis": "parent_receipt" if parent else "column_court_only",
                      "ranking_run_id": ranking_run_id, "scope": config["scope"],
                      "crosswalk_version": CROSSWALK_VERSION},
         parent_receipt=parent,
         config=config,
         outputs=outputs,
         census=census.to_dict(),
-        source_contract=SOURCE_CONTRACT,
+        source_contract=parent["contract"] if parent else SOURCE_CONTRACT,
     )
     (out / RUN_RECEIPT_FILE).write_text(json.dumps(receipt, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
                                         encoding="utf-8")
