@@ -524,9 +524,13 @@ def verify_continuation_plan(plan: Any) -> dict[str, Any]:
     return dict(plan)
 
 
+CONTINUATION_KEY_PREFIX = "continuation:"
+
+
 def continuation_creation_key(parent_mission_id: str, plan_sha256: str) -> str:
-    """Deterministic, so scheduling the same continuation twice is one mission."""
-    return f"continuation:{parent_mission_id}:{plan_sha256[:32]}"
+    """Deterministic, so scheduling the same continuation twice is one mission.
+    The prefix is reserved: public creates may not use it."""
+    return f"{CONTINUATION_KEY_PREFIX}{parent_mission_id}:{plan_sha256[:32]}"
 
 
 def build_lineage(parent: Mission, *, completion: Mapping[str, Any], outcome: Mapping[str, Any],
@@ -571,7 +575,7 @@ def verify_lineage(lineage: Any) -> dict[str, Any]:
 __all__ = [
     "SCHEMA_RECONCILE_REQUEST", "SCHEMA_EXECUTION_EVIDENCE", "SCHEMA_OUTCOME",
     "SCHEMA_CONTINUATION_PLAN", "SCHEMA_LINEAGE", "EXECUTION_STEP_ID", "EXECUTION_EXECUTOR",
-    "REQUIRED_COURT_BINDINGS", "MAX_CONTINUATION_DEPTH",
+    "REQUIRED_COURT_BINDINGS", "MAX_CONTINUATION_DEPTH", "CONTINUATION_KEY_PREFIX",
     "build_acceptance", "build_execution_receipt", "build_lineage", "build_outcome_record",
     "continuation_creation_key", "execution_facts", "require_consequence_free",
     "require_execution_deliverables", "validate_continuation_plan", "validate_reconcile_request",

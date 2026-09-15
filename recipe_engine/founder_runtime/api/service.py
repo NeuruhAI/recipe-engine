@@ -45,7 +45,8 @@ from recipe_engine.founder_runtime.errors import (
     ReconcileRejected, StateTransitionInvalid,
 )
 from recipe_engine.founder_runtime.evidence.reconciliation import (
-    build_lineage, continuation_creation_key, validate_continuation_plan, verify_continuation_plan,
+    CONTINUATION_KEY_PREFIX, build_lineage, continuation_creation_key, validate_continuation_plan,
+    verify_continuation_plan,
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
 from recipe_engine.founder_runtime.ids import hash_payload, new_uuid, stable_id
@@ -227,7 +228,7 @@ class MissionService:
         continuation = None
         if plan is not None:
             key = continuation_creation_key(mission.mission_id, str(plan.get("plan_sha256") or ""))
-            child = self.runtime.store.get_mission_by_creation_key(key)
+            child = self._continuation_child(mission.mission_id, key)
             continuation = {
                 "plan_sha256": plan.get("plan_sha256"),
                 "creation_key": key,
@@ -249,8 +250,9 @@ class MissionService:
             "freshness": {"observed_at": self.clock.now_iso(), "stale": False},
             "receipt_id": rid,
             # Lineage: a continuation child names the completed parent it
-            # continues (the workers bridge carries it as parent_mission_id).
-            "parent_mission_id": lineage.get("parent_mission_id") if lineage else None,
+            # continues. Deliberately NOT surfaced as `parent_mission_id`: the
+            # workers bridge reads that field as "resume this parent's waiting
+            # jobs", which a COMPLETED parent must never have done on its behalf.
             "lineage": lineage,
             "completion": ({"completion_hash": extensions.get("completion_hash"),
                             "outcome_ref": extensions.get("outcome_ref")}
@@ -548,6 +550,12 @@ class MissionService:
                        work_spec: Mapping[str, Any] | None = None,
                        continuation: Mapping[str, Any] | None = None,
                        idempotency_key: str, expected_version: int | None = None) -> dict[str, Any]:
+        if idempotency_key.startswith(CONTINUATION_KEY_PREFIX):
+            # Continuation children are created by the runtime under a key derived
+            # from their parent; a caller claiming one would squat the child's slot.
+            raise ApiError(422, "IDEMPOTENCY_KEY_RESERVED",
+                           "the continuation idempotency namespace is reserved for the runtime",
+                           {"prefix": CONTINUATION_KEY_PREFIX})
         plan = None
         if continuation is not None:
             if work_spec is None:
@@ -1492,6 +1500,16 @@ class MissionService:
                 self._idem_store(idempotency_key, request_hash, response)
             return response
 
+    def _continuation_child(self, parent_mission_id: str, key: str) -> Mission | None:
+        """The mission under a continuation key, only if it really continues this parent."""
+        child = self.runtime.store.get_mission_by_creation_key(key)
+        if child is None:
+            return None
+        lineage = (child.extensions or {}).get("lineage")
+        if not isinstance(lineage, dict) or lineage.get("parent_mission_id") != parent_mission_id:
+            return None
+        return child
+
     def _schedule_continuation(self, parent: Mission) -> dict[str, Any] | None:
         """Create the continuation a verifiably COMPLETED mission declared.
 
@@ -1519,6 +1537,11 @@ class MissionService:
                            "completed parent carries no completion report and outcome", {})
         lineage = build_lineage(parent, completion=completion.to_dict(), outcome=outcome, plan=plan)
         key = continuation_creation_key(parent.mission_id, plan["plan_sha256"])
+        squatter = self.runtime.store.get_mission_by_creation_key(key)
+        if squatter is not None and self._continuation_child(parent.mission_id, key) is None:
+            raise ApiError(409, "CONTINUATION_KEY_SQUATTED",
+                           "a mission without this parent's lineage holds the continuation key",
+                           {"creation_key": key, "mission_id": squatter.mission_id})
         created = self._create_mission_impl(
             objective=plan["objective"], title="", done_criteria=plan["done_criteria"],
             work_spec=plan["work_spec"], continuation_plan=plan.get("continuation"),

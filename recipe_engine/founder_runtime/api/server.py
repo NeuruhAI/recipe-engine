@@ -92,7 +92,6 @@ class MissionEnvelopeBody(BaseModel):
     receipt_id: str
     # Lineage and completion (governed completion + continuation). Optional so
     # every pre-existing envelope keeps its exact shape.
-    parent_mission_id: str | None = None
     lineage: dict[str, Any] | None = None
     completion: dict[str, Any] | None = None
     continuation: dict[str, Any] | None = None

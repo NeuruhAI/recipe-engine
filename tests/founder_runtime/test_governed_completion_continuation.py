@@ -361,7 +361,10 @@ def test_continuation_is_scheduled_only_from_the_completed_mission_with_lineage(
 
     child = service.get_mission(child_id)["envelope"]
     lineage = child["lineage"]
-    assert child["parent_mission_id"] == pid
+    assert lineage["parent_mission_id"] == pid
+    # never surfaced as parent_mission_id: the workers bridge reads that as
+    # "resume this parent's waiting jobs", which a COMPLETED parent must not get
+    assert "parent_mission_id" not in child
     assert lineage["parent_completion_hash"] == res["completion"]["completion_hash"]
     assert lineage["parent_outcome_id"] == res["outcome"]["outcome_id"]
     assert lineage["parent_outcome_hash"] == res["outcome"]["outcome_hash"]
@@ -477,6 +480,85 @@ def test_continuation_declarations_are_validated_and_bound_to_the_creation_key(t
     service.close()
 
 
+# --------------------------------------------------------- crash recovery --
+@pytest.mark.parametrize("crash_at", ["receipt_row", "outcome_row", "completion_row"])
+def test_a_crash_between_an_event_and_its_row_is_repaired_by_the_retry(tmp_path, monkeypatch, crash_at):
+    """Each evidence step commits its event, then its side-table row. A process
+    dying between the two must not strand the mission: the retry rebuilds the
+    missing row from the logged event instead of re-recording (which the store
+    would refuse as a reused idempotency key over a different body)."""
+    from recipe_engine.founder_runtime.contracts.events import EventType
+    from recipe_engine.founder_runtime.persistence.sqlite import SqliteStore
+    from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
+
+    service = queued_service(tmp_path, f"crash-{crash_at}")
+    parent = _parent_with_continuation(service)
+    evidence = to_reconciling(service, parent)
+    armed = {"on": True}
+
+    class Crash(RuntimeError):
+        pass
+
+    if crash_at == "receipt_row":
+        original = SqliteStore.save_receipt
+        def crashing(self, receipt):
+            if armed.pop("on", False):
+                raise Crash("killed between the receipt event and its row")
+            return original(self, receipt)
+        monkeypatch.setattr(SqliteStore, "save_receipt", crashing)
+    elif crash_at == "outcome_row":
+        original = MissionRuntime._record_same_state_event
+        def crashing(self, mission_id, event_type, *args, **kwargs):
+            result = original(self, mission_id, event_type, *args, **kwargs)
+            if event_type == EventType.OUTCOME_RECORDED and armed.pop("on", False):
+                raise Crash("killed between the outcome event and its row")
+            return result
+        monkeypatch.setattr(MissionRuntime, "_record_same_state_event", crashing)
+    else:
+        original = SqliteStore.save_completion
+        def crashing(self, report):
+            if armed.pop("on", False):
+                raise Crash("killed between the completion event and its row")
+            return original(self, report)
+        monkeypatch.setattr(SqliteStore, "save_completion", crashing)
+
+    body = reconcile_body(parent, evidence["record"])
+    with pytest.raises(Crash):
+        service.reconcile_mission(parent["mission_id"], body=body, idempotency_key="crash-1")
+    res = service.reconcile_mission(parent["mission_id"], body=body, idempotency_key="crash-2")
+    assert res["state_after"] == "COMPLETED"
+    assert res["continuation"]["scheduled"] is True
+    mid = parent["mission_id"]
+    completion = service.runtime.store.get_completion(mid)
+    assert completion is not None and completion.completion_hash == res["completion"]["completion_hash"]
+    assert service.runtime.outcome_record(completion.outcome_ref, mid) == res["outcome"]
+    assert len(service.runtime.store.list_receipts(mid)) == 1
+    assert service.runtime.store.verify_mission_chain(mid)["ok"] is True
+    service.close()
+
+
+def test_the_continuation_key_namespace_is_reserved_and_lineage_checked(tmp_path):
+    service = queued_service(tmp_path, "squat")
+    parent = _parent_with_continuation(service)
+    key = parent["continuation"]["creation_key"]
+    with pytest.raises(ApiError) as caught:
+        service.create_mission(objective="Read-only research plan.", work_spec=work_spec(),
+                               idempotency_key=key)
+    assert caught.value.code == "IDEMPOTENCY_KEY_RESERVED"
+    # Even a mission that reached the key some other way is not taken for the child.
+    squatter = service.runtime.create_mission_from_text("Read-only research plan.",
+                                                        creation_idempotency_key=key, work_spec=work_spec())
+    assert service.get_mission(parent["mission_id"])["envelope"]["continuation"]["child_mission_id"] is None
+    evidence = to_reconciling(service, parent)
+    res = service.reconcile_mission(parent["mission_id"], body=reconcile_body(parent, evidence["record"]),
+                                    idempotency_key="squat-rec")
+    assert res["state_after"] == "COMPLETED"
+    assert res["continuation"] == {"scheduled": False, "code": "CONTINUATION_KEY_SQUATTED",
+                                   "message": res["continuation"]["message"],
+                                   "details": {"creation_key": key, "mission_id": squatter.mission_id}}
+    service.close()
+
+
 # ------------------------------------------------------------------- HTTP --
 def _free_port() -> int:
     s = socket.socket()
@@ -522,7 +604,7 @@ def test_reconcile_route_over_loopback_http(tmp_path):
         assert res["state_after"] == "COMPLETED" and res["continuation"]["scheduled"] is True
         listed = {m["mission_id"]: m for m in client.list_missions()["missions"]}
         child = listed[res["continuation"]["child_mission_id"]]
-        assert child["parent_mission_id"] == env["mission_id"]
+        assert child["lineage"]["parent_mission_id"] == env["mission_id"]
         assert child["lineage"]["parent_completion_hash"] == res["completion"]["completion_hash"]
         assert listed[env["mission_id"]]["completion"]["outcome_ref"] == res["outcome"]["outcome_id"]
         replay = client.reconcile(env["mission_id"], reconcile_body(env, evidence["record"]))

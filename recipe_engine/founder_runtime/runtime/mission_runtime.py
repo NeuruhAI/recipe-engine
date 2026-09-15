@@ -886,6 +886,44 @@ class MissionRuntime:
         plan = verify_continuation_plan(plan)
         return continuation_creation_key(mission.mission_id, plan["plan_sha256"])
 
+    def _repair_evidence_projections(self, mission_id: str) -> list[str]:
+        """Restore evidence rows the chain already logged but a crash never wrote.
+
+        record_receipt / record_outcome / complete_mission each commit their event
+        and then, separately, their side-table row. A process that dies between
+        the two leaves the chain ahead of the projection, and a retry cannot heal
+        it by re-recording: the rebuilt event carries a new id and timestamp, and
+        the store rightly refuses a reused idempotency key over a different body.
+        The chain is the truth, so the missing rows are rebuilt from the logged
+        events verbatim (save_receipt/save_completion re-check the logged object).
+        """
+        repaired: list[str] = []
+        for event in self.store.list_events(mission_id):
+            payload = event.payload or {}
+            if event.event_type == EventType.RECEIPT_RECORDED and isinstance(payload.get("receipt"), dict):
+                receipt = ExecutionReceipt.from_dict(payload["receipt"])
+                if self.store.get_receipt(receipt.receipt_id) is None:
+                    self.store.save_receipt(receipt)
+                    repaired.append(f"receipt:{receipt.receipt_id}")
+            elif event.event_type == EventType.OUTCOME_RECORDED and isinstance(payload.get("outcome"), dict):
+                outcome = payload["outcome"]
+                if outcome.get("outcome_id") and self.outcome_record(outcome["outcome_id"], mission_id) is None:
+                    self.store._c().execute(
+                        "INSERT OR IGNORE INTO outcomes(outcome_id, mission_id, body_json, created_at) VALUES (?,?,?,?)",
+                        (outcome["outcome_id"], mission_id, to_canonical(outcome), event.timestamp),
+                    )
+                    repaired.append(f"outcome:{outcome['outcome_id']}")
+            elif event.event_type == EventType.COMPLETION_RECORDED and isinstance(payload.get("completion_report"), dict):
+                if self.store.get_completion(mission_id) is None:
+                    self.store.save_completion(CompletionReport.from_dict(payload["completion_report"]))
+                    repaired.append(f"completion:{mission_id}")
+        if repaired:
+            self.metrics.inc("evidence_projections_repaired")
+            self.log.emit(event_type="evidence_projection_repaired", mission_id=mission_id,
+                          state=self.get_mission(mission_id).current_state.value, result="ok",
+                          extra={"repaired": repaired})
+        return repaired
+
     def reconcile_execution(self, mission_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
         """RECONCILING -> COMPLETED on verified execution evidence. Raises
         ReconcileMalformed / ReconcileRejected / MissionNotFound; appends nothing
@@ -894,6 +932,8 @@ class MissionRuntime:
         if request["mission_id"] != mission_id:
             raise ReconcileRejected("MISSION_MISMATCH", "request names a different mission",
                                     {"route_mission_id": mission_id, "request_mission_id": request["mission_id"]})
+        self.get_mission(mission_id)
+        self._repair_evidence_projections(mission_id)
         mission = self.get_mission(mission_id)
         offered_record_sha = workers_content_sha(request["court_record"])
 

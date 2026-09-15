@@ -287,17 +287,6 @@
             "title": "Objective",
             "type": "string"
           },
-          "parent_mission_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Mission Id"
-          },
           "receipt_id": {
             "title": "Receipt Id",
             "type": "string"
