@@ -1,5 +1,7 @@
 # P1B — Runtime call-path census: CALLER_ABSENT
 
+> **SUPERSEDED 2026-09-15 (T11):** `RUNTIME_CALL_PATH=BOUND`. The three seams below are closed by `scripts/run_opportunity_eligibility.py`, the compiled canonical 30 and DeedSonar `candidate_recipe_membership_eligibility_apply_v1`. See `docs/OPPORTUNITY_ELIGIBILITY_RUNTIME.md`. This ruling stays as the 2026-09-08 seal at `e93f2ac`.
+
 MISSION_ID=NEURUH-DEEDSONAR-LIVE-SYSTEM-CONVERGENCE-20260908 / CHILD_1_REAL_P1B_RUNTIME_BIND
 ROLE=RECIPE_ENGINE_OWNER_IMPLEMENTATION
 BRANCH=cursor/p1b-runtime-caller-census-9a26
