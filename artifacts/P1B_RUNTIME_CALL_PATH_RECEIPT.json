@@ -1,56 +1,76 @@
 {
-  "STATUS": "CALLER_ABSENT",
-  "SUCCESS_CRITERION": "RUNTIME_CALL_PATH=CALLER_ABSENT",
-  "MISSION_ID": "NEURUH-DEEDSONAR-LIVE-SYSTEM-CONVERGENCE-20260908/CHILD_1_REAL_P1B_RUNTIME_BIND",
+  "STATUS": "RUNTIME_BOUND",
+  "SUCCESS_CRITERION": "RUNTIME_CALL_PATH=BOUND",
+  "MISSION_ID": "T11 OPPORTUNITY INTELLIGENCE RUNTIME-SEAM (2026-09-15)",
   "ROLE": "RECIPE_ENGINE_OWNER_IMPLEMENTATION",
   "CANONICAL_OWNER": "NeuruhAI/recipe-engine",
-  "BASE_SHA": "e93f2accf1c675a78655399b421f4e77b39a5223",
-  "PARENT_MODE": "MERGED_TO_RUNTIME_TO_LIVE",
-  "CLI_EXISTS": "YES_BUT_NOT_RUNTIME",
-  "LIBRARY_EXISTS": "YES",
-  "HARNESS_EXISTS": "YES",
-  "RUNTIME_CALL_PATH": "CALLER_ABSENT",
-  "BOUND": {
-    "library": "recipe_engine.opportunity_intelligence.eligibility.evaluate_recipes",
-    "harness": "scripts/p1_independent_eligibility_proof.py",
-    "cli": "scripts/run_independent_eligibility.py"
+  "RUNTIME_CALL_PATH": "BOUND",
+  "RUNTIME_CALLER": {
+    "cli": "scripts/run_opportunity_eligibility.py",
+    "library": "recipe_engine.opportunity_intelligence.eligibility_runtime",
+    "evaluator": "recipe_engine.opportunity_intelligence.recipe_compiler.evaluate_canonical_recipes (decisions = eligibility.derive_decision; lowered recipes asserted equal to the P1 receipt)",
+    "invocation": "on demand, per estate ranking input: evaluate (files) -> apply --mode forecast (READ ONLY) -> apply --mode apply --confirm-run-id"
   },
-  "SEARCHED_NOT_BOUND": [
-    "recipe_engine/founder_runtime",
-    "scripts/daily_run.sh",
-    "run.py",
-    "scripts/rank_nc_curative_raw.py",
-    "scripts/rank_nc_curative_raw_v2.py",
-    "scripts/rank_nc_curative_raw_v3.py",
-    "recipe_engine/opportunity_intelligence/evaluate.py",
-    "scripts/verify_opportunity_intelligence.py",
-    "recipe_engine/opportunity_intelligence/source_factory.py",
-    "recipe_engine/closed_loop/recipe_eval.py",
-    "recipe_engine/closed_loop/e2e.py",
-    "recipe_engine/closed_loop/ledger.py",
-    "recipe_engine/graduation.py",
-    "recipe_engine/autonomy/collapse.py",
-    "recipe_engine/nc_dps_contract.py",
-    "recipe_engine/opportunity_intelligence/oppack_receipts.py"
-  ],
-  "MISSING_SEAMS": [
-    "live eligibility-context producer",
-    "P3 production eligibility-policy catalog",
-    "chosen receipt/storage channel (closed-loop ledger vs Founder Runtime persistence vs DeedSonar membership)"
-  ],
-  "CENSUS": "artifacts/P1B_RUNTIME_CALLER_CENSUS.tsv",
-  "RULING": "docs/P1B_RUNTIME_CALL_PATH_RULING.md",
-  "LOCK": "tests/opportunity_intelligence/test_p1b_runtime_caller_absent.py",
-  "UNKNOWN_PRESERVED": "YES (library; no runtime to regress)",
-  "RECIPE_ORDER_IRRELEVANT": "YES (library)",
-  "VERSION_PINNED": "YES (library)",
-  "EVIDENCE_LINEAGE": "YES (library)",
-  "FRESHNESS": "YES (library)",
-  "REPLAY_IDEMPOTENCE": "YES (library)",
+  "SEAMS_CLOSED": {
+    "live eligibility-context producer": "scripts/run_opportunity_eligibility.py::estate_row_evaluation_input (NC_ESTATE_CROSSWALK, t6.full-universe-ranking-input.v1; blank -> no observation)",
+    "P3 production eligibility-policy catalog": "recipe_compiler compiled canonical 30 (artifacts/recipe_compiler/COMPILED_CANONICAL_30.v1.json, PR #22)",
+    "chosen receipt/storage channel (closed-loop ledger vs Founder Runtime persistence vs DeedSonar membership)": "DeedSonar membership: candidate_recipe_membership via public.candidate_recipe_membership_eligibility_apply_v1 (deedsonar 20260915140000); run artifacts PROPERTY_DECISIONS.jsonl + ELIGIBILITY_MEMBERSHIPS.jsonl + ELIGIBILITY_RUN_RECEIPT.json"
+  },
+  "LEAD_RECIPE_OS": "CONTRACT: membership_key + hashing canon + membership-observation semantics (MATCH only positive; NO_MATCH/UNKNOWN observable; stale MATCH retired). LRO main has no runtime and no membership module; its FIXTURE intake court is on unmerged aaee1da.",
+  "UNKNOWN_PRESERVED": "YES (runtime: blank -> no observation; census counts UNKNOWN per recipe; never projected)",
+  "RECIPE_ORDER_IRRELEVANT": "YES",
+  "RANK_IS_NOT_ELIGIBILITY": "YES (ranked outputs and rank/score/primary_recipe refused in input and output)",
+  "RECIPE_MEMBERSHIP_IS_NOT_RESULT_SET_MEMBERSHIP": "YES (membership = one MATCH decision with its own receipt)",
+  "VERSION_PINNED": "YES (recipe_version <recipe_id>@compiled.<digest12>, compiled set digest in every run)",
+  "EVIDENCE_LINEAGE": "YES (evidence ledger_ref = sha256:<input>#<row>#<family>)",
+  "FRESHNESS": "YES (valid_until = as_of + validity; DeedSonar refuses an expired run)",
+  "REPLAY_IDEMPOTENCE": "YES (same input + code -> byte-identical outputs; re-apply is a no-op)",
+  "LINEAGE_LOCK": "DeedSonar refuses a property whose ranked bag was not ranked on the input the eligibility run evaluated",
   "LEAD_PROMOTION": "NO",
   "CONTACT_AUTHORITY": "NO",
-  "SUPABASE_MUTATED": "NO",
-  "DEEDSONAR_MUTATED": "NO",
   "NEW_DAEMON": "NO",
-  "MERGE": "NO"
+  "LOCK": [
+    "tests/opportunity_intelligence/test_p1b_runtime_caller_absent.py",
+    "tests/opportunity_intelligence/test_opportunity_eligibility_runtime.py"
+  ],
+  "CENSUS": "artifacts/P1B_RUNTIME_CALLER_CENSUS.tsv",
+  "RULING": "docs/OPPORTUNITY_ELIGIBILITY_RUNTIME.md (supersedes docs/P1B_RUNTIME_CALL_PATH_RULING.md)",
+  "HISTORY": [
+    {
+      "STATUS": "CALLER_ABSENT",
+      "SUCCESS_CRITERION": "RUNTIME_CALL_PATH=CALLER_ABSENT",
+      "MISSION_ID": "NEURUH-DEEDSONAR-LIVE-SYSTEM-CONVERGENCE-20260908/CHILD_1_REAL_P1B_RUNTIME_BIND",
+      "BASE_SHA": "e93f2accf1c675a78655399b421f4e77b39a5223",
+      "RUNTIME_CALL_PATH": "CALLER_ABSENT",
+      "MISSING_SEAMS": [
+        "live eligibility-context producer",
+        "P3 production eligibility-policy catalog",
+        "chosen receipt/storage channel (closed-loop ledger vs Founder Runtime persistence vs DeedSonar membership)"
+      ],
+      "SEARCHED_NOT_BOUND": [
+        "recipe_engine/founder_runtime",
+        "scripts/daily_run.sh",
+        "run.py",
+        "scripts/rank_nc_curative_raw.py",
+        "scripts/rank_nc_curative_raw_v2.py",
+        "scripts/rank_nc_curative_raw_v3.py",
+        "recipe_engine/opportunity_intelligence/evaluate.py",
+        "scripts/verify_opportunity_intelligence.py",
+        "recipe_engine/opportunity_intelligence/source_factory.py",
+        "recipe_engine/closed_loop/recipe_eval.py",
+        "recipe_engine/closed_loop/e2e.py",
+        "recipe_engine/closed_loop/ledger.py",
+        "recipe_engine/graduation.py",
+        "recipe_engine/autonomy/collapse.py",
+        "recipe_engine/nc_dps_contract.py",
+        "recipe_engine/opportunity_intelligence/oppack_receipts.py"
+      ],
+      "BOUND": {
+        "library": "recipe_engine.opportunity_intelligence.eligibility.evaluate_recipes",
+        "harness": "scripts/p1_independent_eligibility_proof.py",
+        "cli": "scripts/run_independent_eligibility.py"
+      },
+      "sealed": "2026-09-08"
+    }
+  ]
 }
