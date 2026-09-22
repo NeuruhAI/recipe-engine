@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 from recipe_engine.founder_runtime.api.openapi import generate
 
 
@@ -21,7 +23,7 @@ def test_approved_after_allow(service):
     res = _make(service, "as2")
     mid = res["envelope"]["mission_id"]
     out = service.approve_plan(mid, reason="ok", idempotency_key="as2a",
-                               expected_version=res["envelope"]["version"])
+                               expected_version=res["envelope"]["version"], decider=FOUNDER)
     assert out["authority_state"] == "allow"
     env = out["envelope"]
     assert env["authority"]["state"] == "PLAN_APPROVED_NO_EXECUTION"
@@ -35,7 +37,7 @@ def test_rejected_after_deny(service):
     res = _make(service, "as3")
     mid = res["envelope"]["mission_id"]
     out = service.reject_plan(mid, reason="no", idempotency_key="as3r",
-                              expected_version=res["envelope"]["version"])
+                              expected_version=res["envelope"]["version"], decider=FOUNDER)
     assert out["authority_state"] == "deny"
     env = out["envelope"]
     assert env["authority"]["state"] == "REJECTED"
@@ -48,7 +50,7 @@ def test_lifecycle_not_misleading_after_allow(service):
     res = _make(service, "as4")
     mid = res["envelope"]["mission_id"]
     service.approve_plan(mid, reason="ok", idempotency_key="as4a",
-                         expected_version=res["envelope"]["version"])
+                         expected_version=res["envelope"]["version"], decider=FOUNDER)
     got = service.get_mission(mid)
     # lifecycle state must not claim approval is still pending
     assert got["envelope"]["state"] != "AWAITING_APPROVAL"
@@ -64,7 +66,7 @@ def test_capability_flags_remain_false(service):
     res = _make(service, "as5")
     mid = res["envelope"]["mission_id"]
     out = service.approve_plan(mid, reason="ok", idempotency_key="as5a",
-                               expected_version=res["envelope"]["version"])
+                               expected_version=res["envelope"]["version"], decider=FOUNDER)
     auth = out["envelope"]["authority"]
     assert auth["mutation_authorized"] is False
     assert auth["external_action_authorized"] is False
@@ -80,7 +82,7 @@ def test_event_projection_carries_authority_truth(service):
     res = _make(service, "as6")
     mid = res["envelope"]["mission_id"]
     service.approve_plan(mid, reason="ok", idempotency_key="as6a",
-                         expected_version=res["envelope"]["version"])
+                         expected_version=res["envelope"]["version"], decider=FOUNDER)
     rec = service.receipts(mid)
     approvals = [a for a in rec["approvals"] if a["decision"] == "allow"]
     assert len(approvals) == 1

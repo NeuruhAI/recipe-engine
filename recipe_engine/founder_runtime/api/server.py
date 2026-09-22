@@ -22,7 +22,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from recipe_engine.founder_runtime.api.adapters import organ_status
-from recipe_engine.founder_runtime.api.auth import AuthError, OperatorAuth
+from recipe_engine.founder_runtime.api.auth import AuthError, FounderAuth, OperatorAuth
+from recipe_engine.founder_runtime.api.identity import OPERATOR_DECIDER, Decider
 from recipe_engine.founder_runtime.api.service import ApiError, MissionService, API_VERSION
 
 MAX_BODY = 64 * 1024  # 64 KiB — reject oversized payloads
@@ -123,8 +124,20 @@ class DecisionBody(BaseModel):
     reason: str = Field(default="", max_length=4000)
 
 
+# The founder-only approval routes answer these, never a bare 401, so a caller
+# learns exactly why it was refused (G-1).
+FOUNDER_REFUSALS = {
+    "FOUNDER_TOKEN_MISSING": "the approve routes require the founder credential (neuruh-approve)",
+    "OPERATOR_TOKEN_NOT_FOUNDER": "the operator token cannot record a founder decision; use neuruh-approve",
+    "FOUNDER_AUTH_NOT_CONFIGURED": "this Founder Runtime has no founder credential configured",
+    "FOUNDER_TOKEN_INVALID": "the presented founder credential is not valid",
+}
+FOUNDER_ROUTE_RESPONSES = {403: {"description": "Refused: founder credential required. error code is one of "
+                                               + ", ".join(sorted(FOUNDER_REFUSALS))}}
+
+
 def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool = True,
-              prober=None) -> FastAPI:
+              prober=None, founder_auth: FounderAuth | None = None) -> FastAPI:
     app = FastAPI(title="Neuruh Founder Runtime API", version=API_VERSION,
                   docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -137,13 +150,50 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
             return None
         return authorization[len("Bearer "):].strip()
 
+    founder = founder_auth if founder_auth is not None else FounderAuth(token_sha256="", identity="")
+
+    def _is_founder(token: str | None) -> bool:
+        return founder.configured and founder.verify(token)
+
     async def require_auth(authorization: str | None = Header(default=None)):
         token = _extract(authorization)
+        # The founder is also an operator: neuruh-approve reads a mission's
+        # version with the one credential it holds. The reverse never holds.
+        if _is_founder(token):
+            return True
         try:
             auth.require(token)
         except AuthError as e:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": e.message})
         return True
+
+    def _refuse(code: str):
+        raise HTTPException(status_code=403, detail={"code": code, "message": FOUNDER_REFUSALS[code]})
+
+    async def require_founder(authorization: str | None = Header(default=None)) -> Decider:
+        """The only credential the approve routes accept. decided_by comes from it."""
+        token = _extract(authorization)
+        if not token:
+            _refuse("FOUNDER_TOKEN_MISSING")
+        if auth.verify(token):
+            _refuse("OPERATOR_TOKEN_NOT_FOUNDER")
+        if not founder.configured:
+            _refuse("FOUNDER_AUTH_NOT_CONFIGURED")
+        if not founder.verify(token):
+            _refuse("FOUNDER_TOKEN_INVALID")
+        return Decider(identity=founder.identity, founder=True)
+
+    async def require_decider(authorization: str | None = Header(default=None)) -> Decider:
+        """Reject routes: a denial grants nothing, so the operator may record one,
+        but it is recorded as the operator, never as the founder."""
+        token = _extract(authorization)
+        if _is_founder(token):
+            return Decider(identity=founder.identity, founder=True)
+        try:
+            auth.require(token)
+        except AuthError as e:
+            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": e.message})
+        return OPERATOR_DECIDER
 
     def _idem_key(idempotency_key: str | None) -> str:
         if not idempotency_key or not idempotency_key.strip():
@@ -231,21 +281,30 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
     async def proposed_plan(mission_id: str):
         return service.proposed_plan(mission_id)
 
-    @app.post("/v1/missions/{mission_id}/approve", dependencies=[Depends(require_auth)])
+    @app.post("/v1/missions/{mission_id}/approve", responses=FOUNDER_ROUTE_RESPONSES,
+              description="Founder-only (G-1): requires the founder credential via neuruh-approve. "
+                          "The operator token is refused with 403 OPERATOR_TOKEN_NOT_FOUNDER. "
+                          "decided_by is the authenticated founder identity.")
     async def approve(mission_id: str, body: DecisionBody,
                       idempotency_key: str | None = Header(default=None),
-                      x_expected_version: int | None = Header(default=None)):
+                      x_expected_version: int | None = Header(default=None),
+                      decider: Decider = Depends(require_founder)):
         return service.approve_plan(mission_id, reason=body.reason,
                                     idempotency_key=_idem_key(idempotency_key),
-                                    expected_version=_expected_version(x_expected_version))
+                                    expected_version=_expected_version(x_expected_version),
+                                    decider=decider)
 
-    @app.post("/v1/missions/{mission_id}/reject", dependencies=[Depends(require_auth)])
+    @app.post("/v1/missions/{mission_id}/reject",
+              description="Operator or founder. decided_by is the authenticated identity "
+                          "('operator' for the operator token).")
     async def reject(mission_id: str, body: DecisionBody,
                      idempotency_key: str | None = Header(default=None),
-                     x_expected_version: int | None = Header(default=None)):
+                     x_expected_version: int | None = Header(default=None),
+                     decider: Decider = Depends(require_decider)):
         return service.reject_plan(mission_id, reason=body.reason,
                                    idempotency_key=_idem_key(idempotency_key),
-                                   expected_version=_expected_version(x_expected_version))
+                                   expected_version=_expected_version(x_expected_version),
+                                   decider=decider)
 
     # ---- the mission authority gate --------------------------------------
     # A plan decision and an authority decision are not the same act, and the
@@ -258,21 +317,30 @@ def build_app(service: MissionService, auth: OperatorAuth, *, probe_live: bool =
     # a DENY is recorded and signs nothing, because there is no such thing as a
     # signed refusal, and minting one would create evidence that could be
     # mistaken for permission. Neither route executes anything.
-    @app.post("/v1/missions/{mission_id}/gate/approve", dependencies=[Depends(require_auth)])
+    @app.post("/v1/missions/{mission_id}/gate/approve", responses=FOUNDER_ROUTE_RESPONSES,
+              description="Founder-only (G-1): requires the founder credential via neuruh-approve --gate. "
+                          "The operator token is refused with 403 OPERATOR_TOKEN_NOT_FOUNDER. Only a "
+                          "founder-authenticated ALLOW is signed into the Governance artifact.")
     async def approve_gate(mission_id: str, body: DecisionBody,
                            idempotency_key: str | None = Header(default=None),
-                           x_expected_version: int | None = Header(default=None)):
+                           x_expected_version: int | None = Header(default=None),
+                           decider: Decider = Depends(require_founder)):
         return service.approve_mission_gate(mission_id, reason=body.reason,
                                             idempotency_key=_idem_key(idempotency_key),
-                                            expected_version=_expected_version(x_expected_version))
+                                            expected_version=_expected_version(x_expected_version),
+                                            decider=decider)
 
-    @app.post("/v1/missions/{mission_id}/gate/reject", dependencies=[Depends(require_auth)])
+    @app.post("/v1/missions/{mission_id}/gate/reject",
+              description="Operator or founder. decided_by is the authenticated identity "
+                          "('operator' for the operator token). A DENY is never signed.")
     async def reject_gate(mission_id: str, body: DecisionBody,
                           idempotency_key: str | None = Header(default=None),
-                          x_expected_version: int | None = Header(default=None)):
+                          x_expected_version: int | None = Header(default=None),
+                          decider: Decider = Depends(require_decider)):
         return service.reject_mission_gate(mission_id, reason=body.reason,
                                            idempotency_key=_idem_key(idempotency_key),
-                                           expected_version=_expected_version(x_expected_version))
+                                           expected_version=_expected_version(x_expected_version),
+                                           decider=decider)
 
     # The approval RESOLVER. Governance is asked whether this mission's
     # consequence needs anyone at all; its answer is applied through the kernel.

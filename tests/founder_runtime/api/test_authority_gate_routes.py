@@ -84,41 +84,41 @@ def _version(client, mission_id):
 
 
 # ------------------------------------------------------------------ routing --
-def test_gate_routes_are_reachable_over_http(server_factory, tmp_path):
+def test_gate_routes_are_reachable_over_http(server_factory, tmp_path, founder_token):
     db = str(tmp_path / "routing.sqlite")
     mid = _park_live_mission(db, "gate-routing")
     client, _ = server_factory("routing")
-    out = client.approve_gate(mid, reason="read-only observation approved",
+    out = client.approve_gate(mid, founder_token=founder_token, reason="read-only observation approved",
                               expected_version=_version(client, mid))
     assert out["authority_state"] == "allow"
     # Authority and execution are separate acts: this surface never executes.
     assert out["executed"] is False
 
 
-def test_gate_allow_binds_the_transition_the_kernel_consumes(server_factory, tmp_path):
+def test_gate_allow_binds_the_transition_the_kernel_consumes(server_factory, tmp_path, founder_token):
     """The whole point: a plan decision could never satisfy the gate."""
     db = str(tmp_path / "binding.sqlite")
     mid = _park_live_mission(db, "gate-binding")
     client, _ = server_factory("binding")
-    out = client.approve_gate(mid, reason="ok", expected_version=_version(client, mid))
+    out = client.approve_gate(mid, founder_token=founder_token, reason="ok", expected_version=_version(client, mid))
     assert out["approval"]["exact_requested_action"] == GATE_ACTION
     assert out["approval"]["scope"] == GATE_SCOPE
 
     mid2 = _park_live_mission(db, "gate-binding-plan")
-    plan = client.approve(mid2, reason="ok", expected_version=_version(client, mid2))
+    plan = client.approve(mid2, founder_token=founder_token, reason="ok", expected_version=_version(client, mid2))
     assert plan["approval"]["exact_requested_action"] == "plan_decision:allow"
     assert plan["approval"]["exact_requested_action"] != GATE_ACTION
 
 
 # ------------------------------------------------------------------ signing --
 def test_gate_allow_over_http_mints_the_artifact_bound_to_what_was_published(
-        server_factory, tmp_path, monkeypatch):
+        server_factory, tmp_path, monkeypatch, founder_token):
     monkeypatch.setenv(ENV_FOUNDER_SECRET, SECRET)
     db = str(tmp_path / "signing.sqlite")
     mid = _park_live_mission(db, "gate-signing")
     client, _ = server_factory("signing")
 
-    out = client.approve_gate(mid, reason="ok", expected_version=_version(client, mid))
+    out = client.approve_gate(mid, founder_token=founder_token, reason="ok", expected_version=_version(client, mid))
     refs = _signed(out["approval"]["evidence_refs"])
     assert len(refs) == 1, out["approval"]["evidence_refs"]
     artifact = json.loads(refs[0][len(GOV_APPROVAL_REF_PREFIX):])
@@ -143,24 +143,24 @@ def test_gate_deny_over_http_signs_nothing(server_factory, tmp_path, monkeypatch
     assert _signed(out["approval"]["evidence_refs"]) == []
 
 
-def test_plan_route_never_mints_an_artifact(server_factory, tmp_path, monkeypatch):
+def test_plan_route_never_mints_an_artifact(server_factory, tmp_path, monkeypatch, founder_token):
     """A plan approval must not become a spendable authority artifact."""
     monkeypatch.setenv(ENV_FOUNDER_SECRET, SECRET)
     db = str(tmp_path / "planonly.sqlite")
     mid = _park_live_mission(db, "gate-planonly")
     client, _ = server_factory("planonly")
-    out = client.approve(mid, reason="ok", expected_version=_version(client, mid))
+    out = client.approve(mid, founder_token=founder_token, reason="ok", expected_version=_version(client, mid))
     assert _signed(out["approval"]["evidence_refs"]) == []
 
 
-def test_gate_without_a_signing_key_records_but_cannot_mint(server_factory, tmp_path, monkeypatch):
+def test_gate_without_a_signing_key_records_but_cannot_mint(server_factory, tmp_path, monkeypatch, founder_token):
     """Fail closed: no key means no artifact, so the live mission simply parks."""
     monkeypatch.delenv(ENV_FOUNDER_SECRET, raising=False)
     monkeypatch.delenv("GOVERNANCE_FOUNDER_SECRET_FILE", raising=False)
     db = str(tmp_path / "unsigned.sqlite")
     mid = _park_live_mission(db, "gate-unsigned")
     client, _ = server_factory("unsigned")
-    out = client.approve_gate(mid, reason="ok", expected_version=_version(client, mid))
+    out = client.approve_gate(mid, founder_token=founder_token, reason="ok", expected_version=_version(client, mid))
     assert out["authority_state"] == "allow"
     assert _signed(out["approval"]["evidence_refs"]) == []
 
@@ -176,7 +176,7 @@ def test_gate_reject_requires_a_reason(server_factory, tmp_path):
     assert e.value.status == 422
 
 
-def test_gate_routes_require_auth_idempotency_and_version(server_factory, tmp_path):
+def test_gate_routes_require_auth_idempotency_and_version(server_factory, tmp_path, founder_token):
     import urllib.error
     import urllib.request
     db = str(tmp_path / "headers.sqlite")
@@ -193,22 +193,26 @@ def test_gate_routes_require_auth_idempotency_and_version(server_factory, tmp_pa
         except urllib.error.HTTPError as err:
             return err.code
 
-    auth = {"Authorization": f"Bearer {client._token}"}
-    assert post({}) == 401
-    assert post({"Authorization": "Bearer wrong"}) == 401
+    # G-1: the approve routes answer 403 with a named reason, and only the
+    # founder credential gets as far as the idempotency and version checks.
+    operator = {"Authorization": f"Bearer {client._token}"}
+    auth = {"Authorization": f"Bearer {founder_token}"}
+    assert post({}) == 403                                          # FOUNDER_TOKEN_MISSING
+    assert post({"Authorization": "Bearer wrong"}) == 403           # FOUNDER_TOKEN_INVALID
+    assert post({**operator, "Idempotency-Key": "k0", "X-Expected-Version": "1"}) == 403
     assert post(auth) == 428                                       # no Idempotency-Key
     assert post({**auth, "Idempotency-Key": "k1"}) == 428           # no X-Expected-Version
     assert post({**auth, "Idempotency-Key": "k2", "X-Expected-Version": "99999"}) == 409
 
 
-def test_gate_decision_is_a_single_terminal_latch(server_factory, tmp_path):
+def test_gate_decision_is_a_single_terminal_latch(server_factory, tmp_path, founder_token):
     from recipe_engine.founder_runtime.api.client import ApiClientError
     db = str(tmp_path / "latch.sqlite")
     mid = _park_live_mission(db, "gate-latch")
     client, _ = server_factory("latch")
     ver = _version(client, mid)
-    client.approve_gate(mid, reason="ok", idempotency_key="latch-1", expected_version=ver)
-    replay = client.approve_gate(mid, reason="ok", idempotency_key="latch-1", expected_version=ver)
+    client.approve_gate(mid, founder_token=founder_token, reason="ok", idempotency_key="latch-1", expected_version=ver)
+    replay = client.approve_gate(mid, founder_token=founder_token, reason="ok", idempotency_key="latch-1", expected_version=ver)
     assert replay["idempotent_replay"] is True
     with pytest.raises(ApiClientError) as e:
         client.reject_gate(mid, reason="changed my mind", idempotency_key="latch-2",
