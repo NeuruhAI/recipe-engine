@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import threading
 
 import pytest
@@ -27,7 +29,7 @@ def test_approval_race_single_winner(service):
 
     def _approve(key):
         try:
-            results.append(service.approve_plan(mid, reason="race", idempotency_key=key, expected_version=ver))
+            results.append(service.approve_plan(mid, reason="race", idempotency_key=key, expected_version=ver, decider=FOUNDER))
         except ApiError as e:
             errors.append(e)
 
@@ -49,10 +51,10 @@ def test_second_distinct_approval_after_first_conflicts(service):
     res = service.create_mission(objective="status", idempotency_key="cc3")
     mid = res["envelope"]["mission_id"]
     ver = res["envelope"]["version"]
-    service.approve_plan(mid, reason="first", idempotency_key="a1", expected_version=ver)
+    service.approve_plan(mid, reason="first", idempotency_key="a1", expected_version=ver, decider=FOUNDER)
     # state advanced; a new (different key) approval at the old version is stale
     with pytest.raises(ApiError) as ei:
-        service.approve_plan(mid, reason="second", idempotency_key="a2", expected_version=ver)
+        service.approve_plan(mid, reason="second", idempotency_key="a2", expected_version=ver, decider=FOUNDER)
     assert ei.value.code in ("VERSION_CONFLICT", "NOT_AWAITING_APPROVAL", "MISSION_TERMINAL")
 
 

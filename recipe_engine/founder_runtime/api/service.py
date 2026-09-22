@@ -27,6 +27,7 @@ from recipe_engine.autonomy.models import (
 )
 from recipe_engine.founder_runtime import RUNTIME_VERSION
 from recipe_engine.founder_runtime.adapters.fixture_governance import FixtureGovernance
+from recipe_engine.founder_runtime.api.identity import Decider
 from recipe_engine.founder_runtime.api.founder_signing import (
     APPROVAL_TTL_SECONDS,
     FounderApprovalSigner,
@@ -712,7 +713,17 @@ class MissionService:
 
     def _record_decision(self, mission_id: str, *, decision: ApprovalDecision, reason: str,
                          idempotency_key: str, expected_version: int | None,
-                         gate: bool = False) -> dict[str, Any]:
+                         decider: Decider, gate: bool = False) -> dict[str, Any]:
+        # G-1: an ALLOW is the founder's act. The HTTP surface already refuses the
+        # operator token on the approve routes; this is the same rule in the
+        # service, so no in-process caller can record (or get signed) an ALLOW
+        # under an identity that did not authenticate as the founder.
+        if not isinstance(decider, Decider):
+            raise ApiError(500, "DECIDER_REQUIRED", "a decision needs an authenticated decider", {})
+        if decision == ApprovalDecision.ALLOW and not decider.founder:
+            raise ApiError(403, "FOUNDER_REQUIRED",
+                           "only a founder-authenticated decider may record an ALLOW; nothing was recorded",
+                           {"decided_by": decider.identity})
         with self._lock:
             self._require_expected_version(expected_version)
             mission = self._get(mission_id)
@@ -722,6 +733,8 @@ class MissionService:
                 "reason": reason,
                 "mission_id": mission_id,
                 "gate": gate,
+                # The same key under a different identity is a different request.
+                "decided_by": decider.identity,
             }
             if mission.work_spec_sha256 is not None:
                 request_material["work_spec_sha256"] = mission.work_spec_sha256
@@ -786,6 +799,7 @@ class MissionService:
                     not bound
                     and gate
                     and decision == ApprovalDecision.ALLOW
+                    and decider.founder
                     and self.signer.configured
                     and self.runtime.published_authorization_request(mission_id) is not None
                 )
@@ -824,7 +838,7 @@ class MissionService:
                     resolver.WORK_SPEC_SHA256_EVIDENCE_PREFIX + mission.work_spec_sha256,
                 )
             signed_note = None
-            if gate and decision == ApprovalDecision.ALLOW:
+            if gate and decision == ApprovalDecision.ALLOW and decider.founder:
                 signed_note = self._mint_gate_artifact(
                     mission_id,
                     action=requested_action,
@@ -849,7 +863,7 @@ class MissionService:
                 exact_requested_action=requested_action,
                 scope=scope,
                 requested_by="founder",
-                decided_by="jeramie",
+                decided_by=decider.identity,
                 decision=decision,
                 conditions=conditions,
                 expiry=None,
@@ -1187,6 +1201,8 @@ class MissionService:
         if res.outcome == resolver.FOUNDER_REQUIRED:
             out["founder_gate"] = {
                 "approve_route": "/v1/missions/{mission_id}/gate/approve",
+                "approve_auth": "founder credential only; the operator token is refused (403 OPERATOR_TOKEN_NOT_FOUNDER)",
+                "approve_command": "neuruh-approve {mission_id} --gate --reason \"...\"",
                 "reject_route": "/v1/missions/{mission_id}/gate/reject",
                 "resolve_route": "/v1/missions/{mission_id}/gate/resolve",
                 "signs": "gov.founder.approval.v1 scope_once bound to the published scope_key + source_sha + risk_tier",
@@ -1195,19 +1211,21 @@ class MissionService:
         return out
 
     def approve_plan(self, mission_id: str, *, reason: str, idempotency_key: str,
-                     expected_version: int | None = None) -> dict[str, Any]:
+                     expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
         return self._record_decision(mission_id, decision=ApprovalDecision.ALLOW, reason=reason,
-                                     idempotency_key=idempotency_key, expected_version=expected_version)
+                                     idempotency_key=idempotency_key, expected_version=expected_version,
+                                     decider=decider)
 
     def reject_plan(self, mission_id: str, *, reason: str, idempotency_key: str,
-                    expected_version: int | None = None) -> dict[str, Any]:
+                    expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
         if not reason:
             raise ApiError(422, "REASON_REQUIRED", "rejection requires a reason", {})
         return self._record_decision(mission_id, decision=ApprovalDecision.DENY, reason=reason,
-                                     idempotency_key=idempotency_key, expected_version=expected_version)
+                                     idempotency_key=idempotency_key, expected_version=expected_version,
+                                     decider=decider)
 
     def approve_mission_gate(self, mission_id: str, *, reason: str, idempotency_key: str,
-                             expected_version: int | None = None) -> dict[str, Any]:
+                             expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
         """Record the founder's ALLOW for the mission's authority gate.
 
         This is the external origin the live mission gate requires. It records
@@ -1217,16 +1235,16 @@ class MissionService:
         """
         return self._record_decision(mission_id, decision=ApprovalDecision.ALLOW, reason=reason,
                                      idempotency_key=idempotency_key,
-                                     expected_version=expected_version, gate=True)
+                                     expected_version=expected_version, decider=decider, gate=True)
 
     def reject_mission_gate(self, mission_id: str, *, reason: str, idempotency_key: str,
-                            expected_version: int | None = None) -> dict[str, Any]:
-        """Record the founder's DENY for the mission's authority gate."""
+                            expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
+        """Record a DENY for the mission's authority gate (operator or founder)."""
         if not reason.strip():
             raise ApiError(422, "REASON_REQUIRED", "rejection requires a reason", {})
         return self._record_decision(mission_id, decision=ApprovalDecision.DENY, reason=reason,
                                      idempotency_key=idempotency_key,
-                                     expected_version=expected_version, gate=True)
+                                     expected_version=expected_version, decider=decider, gate=True)
 
     def _lifecycle(self, mission_id: str, *, action: str, idempotency_key: str,
                    expected_version: int | None) -> dict[str, Any]:

@@ -17,6 +17,8 @@ closed:
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import pytest
 
 from recipe_engine.founder_runtime.api.service import ApiError, MissionService
@@ -67,7 +69,7 @@ def test_founder_gate_deny_is_never_overridden_by_the_resolver(tmp_path):
     svc = _svc(tmp_path, "deny-a", governance=gov)
     mid = _park(svc, key="a1")
     svc.reject_mission_gate(mid, reason="I do not want this mission run",
-                            idempotency_key="a1-reject", expected_version=_version(svc, mid))
+                            idempotency_key="a1-reject", expected_version=_version(svc, mid), decider=FOUNDER)
     out = svc.resolve_authority(mid, idempotency_key="a1-resolve", expected_version=_version(svc, mid))
 
     assert out["authority_state"] == resolver.FOUNDER_DENIED
@@ -85,7 +87,7 @@ def test_founder_deny_survives_repeated_resolve_attempts(tmp_path):
     svc = _svc(tmp_path, "deny-a2", governance=gov)
     mid = _park(svc, key="a2")
     svc.reject_mission_gate(mid, reason="no", idempotency_key="a2-reject",
-                            expected_version=_version(svc, mid))
+                            expected_version=_version(svc, mid), decider=FOUNDER)
     for i in range(3):
         out = svc.resolve_authority(mid, idempotency_key=f"a2-r{i}", expected_version=_version(svc, mid))
         assert out["authority_state"] == resolver.FOUNDER_DENIED
@@ -188,7 +190,7 @@ def test_approve_on_a_policy_blocked_mission_writes_nothing(tmp_path):
 
     with pytest.raises(ApiError) as exc:
         svc.approve_plan(mid, reason="override", idempotency_key="d1-approve",
-                         expected_version=_version(svc, mid))
+                         expected_version=_version(svc, mid), decider=FOUNDER)
     assert exc.value.status in (409, 422)
     assert _approvals(svc, mid) == [], "nothing was persisted on the failing path"
     assert svc.get_mission(mid)["envelope"]["authority"]["state"] == "BLOCKED"
@@ -201,7 +203,7 @@ def test_policy_blocked_mission_never_reports_approved_authority(tmp_path):
     svc = _svc(tmp_path, "blocked-d2", governance=gov)
     mid = _park(svc, objective="edit the README draft locally", key="d2")
     svc.approve_mission_gate(mid, reason="ok", idempotency_key="d2-approve",
-                             expected_version=_version(svc, mid))
+                             expected_version=_version(svc, mid), decider=FOUNDER)
     svc.governance = _Governance(deny_classes={"artifact_write"})
     svc.resolve_authority(mid, idempotency_key="d2-resolve", expected_version=_version(svc, mid))
     assert _state(svc, mid) == "BLOCKED_POLICY"
@@ -260,7 +262,7 @@ def test_plan_approved_mission_still_resumes_to_approved_no_execution(tmp_path):
     gov = _Governance()
     svc = _svc(tmp_path, "strand-f2", governance=gov)
     mid = _park(svc, key="f2")
-    svc.approve_plan(mid, reason="ok", idempotency_key="f2-approve", expected_version=_version(svc, mid))
+    svc.approve_plan(mid, reason="ok", idempotency_key="f2-approve", expected_version=_version(svc, mid), decider=FOUNDER)
     assert _state(svc, mid) == "APPROVED_NO_EXECUTION"
     svc.pause(mid, idempotency_key="f2-pause", expected_version=_version(svc, mid))
     svc.resume(mid, idempotency_key="f2-resume", expected_version=_version(svc, mid))

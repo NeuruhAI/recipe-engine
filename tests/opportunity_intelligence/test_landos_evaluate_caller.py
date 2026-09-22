@@ -319,6 +319,10 @@ def test_old_identity_evaluate_path_is_not_this_seam():
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
+            # Consume the request body before answering. Closing a socket with
+            # unread data makes TCP send a RST, and whether the client then sees
+            # this 404 or "Connection reset by peer" depended on timing.
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
             self.send_response(200 if self.path == "/evaluate" else 404)
             self.send_header("Content-Type", "application/json")
             self.end_headers()

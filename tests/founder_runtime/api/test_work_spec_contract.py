@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import json
 import os
 import subprocess
@@ -472,7 +474,7 @@ def test_27_plan_approval_is_not_advertised_as_dispatch_authority(tmp_path):
         created["envelope"]["mission_id"],
         reason="plan only",
         idempotency_key="plan-only",
-        expected_version=created["envelope"]["version"],
+        expected_version=created["envelope"]["version"], decider=FOUNDER
     )
     assert approved["envelope"]["state"] == "APPROVED_NO_EXECUTION"
     assert approved["envelope"]["authority"]["state"] == "PLAN_APPROVED_NO_EXECUTION"
