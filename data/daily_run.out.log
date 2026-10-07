@@ -135,3 +135,572 @@ manifest sha256: d8cd10b07421a4feb3343c987fdecc1a605f406137ab1504639cf5770de990c
   "engine_called": 9,
   "engine_ok": 9
 }
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (8 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 11 events (0 in territory, 11 dupes) (fetched)
+niles: 21 events (6 in territory, 10 dupes) (fetched)
+buchanan: 23 events (0 in territory, 19 dupes) (fetched)
+berrien-springs: 19 events (0 in territory, 19 dupes) (fetched)
+coloma: 11 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 15 events (0 in territory, 12 dupes) (fetched)
+south-bend: 18 events (0 in territory, 17 dupes) (fetched)
+mishawaka: 14 events (0 in territory, 14 dupes) (fetched)
+granger: 15 events (0 in territory, 15 dupes) (fetched)
+dowagiac: 18 events (0 in territory, 18 dupes) (fetched)
+edwardsburg: 15 events (0 in territory, 15 dupes) (fetched)
+elkhart: 14 events (0 in territory, 14 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260915T100001Z.manifest.json
+manifest sha256: 2403ec4f26739761a3a5a870d75acd20466e3fd858fb7e3806b576dd528f6732
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 31,
+  "events_upserted": 1,
+  "in_territory": 14,
+  "report_only": 17,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 12 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 12 events (0 in territory, 12 dupes) (fetched)
+niles: 22 events (6 in territory, 11 dupes) (fetched)
+buchanan: 23 events (0 in territory, 19 dupes) (fetched)
+berrien-springs: 20 events (0 in territory, 20 dupes) (fetched)
+coloma: 12 events (0 in territory, 11 dupes) (fetched)
+new-buffalo: 16 events (0 in territory, 13 dupes) (fetched)
+south-bend: 18 events (0 in territory, 17 dupes) (fetched)
+mishawaka: 14 events (0 in territory, 14 dupes) (fetched)
+granger: 15 events (0 in territory, 15 dupes) (fetched)
+dowagiac: 20 events (0 in territory, 20 dupes) (fetched)
+edwardsburg: 15 events (0 in territory, 15 dupes) (fetched)
+elkhart: 14 events (0 in territory, 14 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260916T100005Z.manifest.json
+manifest sha256: 7a6759c71b80963345bade2da0b6a4cee4cdfa950b5571a3b6be449ba3c37cf5
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 32,
+  "events_upserted": 1,
+  "in_territory": 15,
+  "report_only": 17,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 13 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 12 events (0 in territory, 12 dupes) (fetched)
+niles: 24 events (6 in territory, 11 dupes) (fetched)
+buchanan: 24 events (0 in territory, 20 dupes) (fetched)
+berrien-springs: 21 events (0 in territory, 21 dupes) (fetched)
+coloma: 13 events (0 in territory, 12 dupes) (fetched)
+new-buffalo: 16 events (0 in territory, 13 dupes) (fetched)
+south-bend: 20 events (0 in territory, 19 dupes) (fetched)
+mishawaka: 16 events (0 in territory, 16 dupes) (fetched)
+granger: 16 events (0 in territory, 16 dupes) (fetched)
+dowagiac: 23 events (0 in territory, 22 dupes) (fetched)
+edwardsburg: 18 events (0 in territory, 18 dupes) (fetched)
+elkhart: 16 events (0 in territory, 16 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260917T100005Z.manifest.json
+manifest sha256: 36fc354ab37f35fe590d8223dda22aa69073399bfa181c8a4c628d03f23541c0
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 36,
+  "events_upserted": 4,
+  "in_territory": 15,
+  "report_only": 21,
+  "engine_called": 15,
+  "engine_ok": 15
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 13 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 12 events (0 in territory, 12 dupes) (fetched)
+niles: 23 events (5 in territory, 11 dupes) (fetched)
+buchanan: 23 events (0 in territory, 19 dupes) (fetched)
+berrien-springs: 20 events (0 in territory, 20 dupes) (fetched)
+coloma: 13 events (0 in territory, 12 dupes) (fetched)
+new-buffalo: 17 events (0 in territory, 14 dupes) (fetched)
+south-bend: 19 events (0 in territory, 18 dupes) (fetched)
+mishawaka: 15 events (0 in territory, 15 dupes) (fetched)
+granger: 15 events (0 in territory, 15 dupes) (fetched)
+dowagiac: 23 events (0 in territory, 21 dupes) (fetched)
+edwardsburg: 17 events (0 in territory, 17 dupes) (fetched)
+elkhart: 15 events (0 in territory, 15 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260919T100001Z.manifest.json
+manifest sha256: 46c355c4c6fe107defaaca9af69f5356929f55e15713ad75088bff77db34d564
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 36,
+  "events_upserted": 1,
+  "in_territory": 14,
+  "report_only": 22,
+  "engine_called": 14,
+  "engine_ok": 14
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (7 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 9 events (0 in territory, 9 dupes) (fetched)
+niles: 15 events (5 in territory, 8 dupes) (fetched)
+buchanan: 19 events (0 in territory, 15 dupes) (fetched)
+berrien-springs: 16 events (0 in territory, 16 dupes) (fetched)
+coloma: 12 events (0 in territory, 11 dupes) (fetched)
+new-buffalo: 14 events (0 in territory, 12 dupes) (fetched)
+south-bend: 12 events (0 in territory, 12 dupes) (fetched)
+mishawaka: 9 events (0 in territory, 9 dupes) (fetched)
+granger: 9 events (0 in territory, 9 dupes) (fetched)
+dowagiac: 18 events (0 in territory, 15 dupes) (fetched)
+edwardsburg: 10 events (0 in territory, 10 dupes) (fetched)
+elkhart: 9 events (0 in territory, 9 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260922T100003Z.manifest.json
+manifest sha256: cbcf8540e604c8170f83a7c55f78f233fcdee43bcef7c4069c4e519c1877d36f
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 28,
+  "events_upserted": 3,
+  "in_territory": 12,
+  "report_only": 16,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (7 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 9 events (0 in territory, 9 dupes) (fetched)
+niles: 15 events (5 in territory, 8 dupes) (fetched)
+buchanan: 19 events (0 in territory, 15 dupes) (fetched)
+berrien-springs: 16 events (0 in territory, 16 dupes) (fetched)
+coloma: 12 events (0 in territory, 11 dupes) (fetched)
+new-buffalo: 14 events (0 in territory, 12 dupes) (fetched)
+south-bend: 12 events (0 in territory, 12 dupes) (fetched)
+mishawaka: 9 events (0 in territory, 9 dupes) (fetched)
+granger: 9 events (0 in territory, 9 dupes) (fetched)
+dowagiac: 17 events (0 in territory, 15 dupes) (fetched)
+edwardsburg: 9 events (0 in territory, 9 dupes) (fetched)
+elkhart: 9 events (0 in territory, 9 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260923T100005Z.manifest.json
+manifest sha256: 3616f018a052e22aef25b725743ce897c03083551714cbd016c20344410d439c
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 27,
+  "events_upserted": 0,
+  "in_territory": 12,
+  "report_only": 15,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (7 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 9 events (0 in territory, 9 dupes) (fetched)
+niles: 17 events (8 in territory, 8 dupes) (fetched)
+buchanan: 21 events (0 in territory, 17 dupes) (fetched)
+berrien-springs: 17 events (0 in territory, 17 dupes) (fetched)
+coloma: 11 events (0 in territory, 11 dupes) (fetched)
+new-buffalo: 14 events (0 in territory, 12 dupes) (fetched)
+south-bend: 15 events (0 in territory, 15 dupes) (fetched)
+mishawaka: 11 events (0 in territory, 11 dupes) (fetched)
+granger: 11 events (0 in territory, 11 dupes) (fetched)
+dowagiac: 17 events (0 in territory, 16 dupes) (fetched)
+edwardsburg: 11 events (0 in territory, 11 dupes) (fetched)
+elkhart: 11 events (0 in territory, 11 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260924T100005Z.manifest.json
+manifest sha256: d321d032524e047df776785f4d5e5825828cd5e9cde2d750c8196f3243f7e662
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 27,
+  "events_upserted": 3,
+  "in_territory": 15,
+  "report_only": 12,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 13 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 12 events (0 in territory, 12 dupes) (fetched)
+niles: 19 events (8 in territory, 10 dupes) (fetched)
+buchanan: 24 events (1 in territory, 19 dupes) (fetched)
+berrien-springs: 20 events (0 in territory, 20 dupes) (fetched)
+coloma: 12 events (0 in territory, 12 dupes) (fetched)
+new-buffalo: 16 events (0 in territory, 14 dupes) (fetched)
+south-bend: 17 events (0 in territory, 17 dupes) (fetched)
+mishawaka: 12 events (0 in territory, 12 dupes) (fetched)
+granger: 12 events (0 in territory, 12 dupes) (fetched)
+dowagiac: 18 events (0 in territory, 17 dupes) (fetched)
+edwardsburg: 12 events (0 in territory, 12 dupes) (fetched)
+elkhart: 12 events (0 in territory, 12 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260925T100003Z.manifest.json
+manifest sha256: dd6ea1614e87a982819c7aaba957f1895c2e511927865f6804e18337680013c8
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 30,
+  "events_upserted": 3,
+  "in_territory": 18,
+  "report_only": 12,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 13 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 12 events (0 in territory, 12 dupes) (fetched)
+niles: 19 events (8 in territory, 10 dupes) (fetched)
+buchanan: 24 events (1 in territory, 19 dupes) (fetched)
+berrien-springs: 20 events (0 in territory, 20 dupes) (fetched)
+coloma: 12 events (0 in territory, 12 dupes) (fetched)
+new-buffalo: 15 events (0 in territory, 13 dupes) (fetched)
+south-bend: 18 events (0 in territory, 18 dupes) (fetched)
+mishawaka: 13 events (0 in territory, 13 dupes) (fetched)
+granger: 13 events (0 in territory, 13 dupes) (fetched)
+dowagiac: 18 events (0 in territory, 17 dupes) (fetched)
+edwardsburg: 13 events (0 in territory, 13 dupes) (fetched)
+elkhart: 13 events (0 in territory, 13 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260926T100001Z.manifest.json
+manifest sha256: 39205e723b1cac6d5fd4dde76d009bacfb40fda0e2b36e452639f7c8a594782d
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 30,
+  "events_upserted": 1,
+  "in_territory": 18,
+  "report_only": 12,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (8 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 10 events (0 in territory, 10 dupes) (fetched)
+niles: 18 events (8 in territory, 9 dupes) (fetched)
+buchanan: 21 events (1 in territory, 18 dupes) (fetched)
+berrien-springs: 20 events (0 in territory, 20 dupes) (fetched)
+coloma: 10 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 13 events (0 in territory, 11 dupes) (fetched)
+south-bend: 15 events (0 in territory, 15 dupes) (fetched)
+mishawaka: 12 events (0 in territory, 12 dupes) (fetched)
+granger: 12 events (0 in territory, 12 dupes) (fetched)
+dowagiac: 16 events (0 in territory, 16 dupes) (fetched)
+edwardsburg: 12 events (0 in territory, 12 dupes) (fetched)
+elkhart: 12 events (0 in territory, 12 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260927T100005Z.manifest.json
+manifest sha256: b8bca0228f900d4757c250a57f124ade043ca5406ae99ce3def6df2611dfc1da
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 25,
+  "events_upserted": 1,
+  "in_territory": 17,
+  "report_only": 8,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 10 events (0 in territory, 10 dupes) (fetched)
+niles: 17 events (8 in territory, 8 dupes) (fetched)
+buchanan: 20 events (1 in territory, 17 dupes) (fetched)
+berrien-springs: 20 events (0 in territory, 20 dupes) (fetched)
+coloma: 10 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 13 events (0 in territory, 11 dupes) (fetched)
+south-bend: 14 events (0 in territory, 14 dupes) (fetched)
+mishawaka: 11 events (0 in territory, 11 dupes) (fetched)
+granger: 11 events (0 in territory, 11 dupes) (fetched)
+dowagiac: 16 events (0 in territory, 16 dupes) (fetched)
+edwardsburg: 11 events (0 in territory, 11 dupes) (fetched)
+elkhart: 11 events (0 in territory, 11 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260928T100003Z.manifest.json
+manifest sha256: 500db582f3f3cab8561507853fd73d044f2aac05abb3aebd53bd6843226d5fa1
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 25,
+  "events_upserted": 1,
+  "in_territory": 18,
+  "report_only": 7,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 11 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 10 events (0 in territory, 10 dupes) (fetched)
+niles: 21 events (10 in territory, 9 dupes) (fetched)
+buchanan: 24 events (1 in territory, 21 dupes) (fetched)
+berrien-springs: 23 events (0 in territory, 23 dupes) (fetched)
+coloma: 11 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 13 events (0 in territory, 11 dupes) (fetched)
+south-bend: 18 events (0 in territory, 18 dupes) (fetched)
+mishawaka: 15 events (0 in territory, 15 dupes) (fetched)
+granger: 15 events (0 in territory, 15 dupes) (fetched)
+dowagiac: 19 events (0 in territory, 19 dupes) (fetched)
+edwardsburg: 15 events (0 in territory, 15 dupes) (fetched)
+elkhart: 15 events (0 in territory, 15 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260929T100000Z.manifest.json
+manifest sha256: 941022b90ad8493a45c4600cb775b486f3f86b772c8127dd07eaeaeba6a251ad
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 29,
+  "events_upserted": 5,
+  "in_territory": 20,
+  "report_only": 9,
+  "engine_called": 20,
+  "engine_ok": 20
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 10 events (0 in territory, 10 dupes) (fetched)
+niles: 24 events (11 in territory, 9 dupes) (fetched)
+buchanan: 27 events (1 in territory, 24 dupes) (fetched)
+berrien-springs: 24 events (0 in territory, 24 dupes) (fetched)
+coloma: 13 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 15 events (0 in territory, 12 dupes) (fetched)
+south-bend: 22 events (0 in territory, 21 dupes) (fetched)
+mishawaka: 19 events (0 in territory, 19 dupes) (fetched)
+granger: 18 events (0 in territory, 18 dupes) (fetched)
+dowagiac: 23 events (0 in territory, 23 dupes) (fetched)
+edwardsburg: 17 events (0 in territory, 17 dupes) (fetched)
+elkhart: 17 events (0 in territory, 17 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20260930T100000Z.manifest.json
+manifest sha256: daaab16af7289dc6756ca6de9a2686147577c92d712b57792b8d6bf89e19f180
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 36,
+  "events_upserted": 7,
+  "in_territory": 21,
+  "report_only": 15,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 12 events (10 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 11 events (0 in territory, 11 dupes) (fetched)
+niles: 26 events (12 in territory, 10 dupes) (fetched)
+buchanan: 29 events (1 in territory, 26 dupes) (fetched)
+berrien-springs: 26 events (0 in territory, 26 dupes) (fetched)
+coloma: 14 events (0 in territory, 11 dupes) (fetched)
+new-buffalo: 16 events (0 in territory, 13 dupes) (fetched)
+south-bend: 24 events (0 in territory, 23 dupes) (fetched)
+mishawaka: 20 events (0 in territory, 20 dupes) (fetched)
+granger: 20 events (0 in territory, 20 dupes) (fetched)
+dowagiac: 24 events (0 in territory, 24 dupes) (fetched)
+edwardsburg: 19 events (0 in territory, 19 dupes) (fetched)
+elkhart: 18 events (0 in territory, 18 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20261001T100001Z.manifest.json
+manifest sha256: bcb62666be382f1e8d62f2fb4b47ac8a0081af90836c631b9cdb839d09a71e57
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 38,
+  "events_upserted": 2,
+  "in_territory": 23,
+  "report_only": 15,
+  "engine_called": 23,
+  "engine_ok": 23
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 12 events (9 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 12 events (0 in territory, 12 dupes) (fetched)
+niles: 27 events (13 in territory, 10 dupes) (fetched)
+buchanan: 30 events (1 in territory, 27 dupes) (fetched)
+berrien-springs: 26 events (0 in territory, 26 dupes) (fetched)
+coloma: 14 events (0 in territory, 11 dupes) (fetched)
+new-buffalo: 17 events (0 in territory, 13 dupes) (fetched)
+south-bend: 25 events (0 in territory, 24 dupes) (fetched)
+mishawaka: 21 events (0 in territory, 21 dupes) (fetched)
+granger: 21 events (0 in territory, 21 dupes) (fetched)
+dowagiac: 25 events (0 in territory, 25 dupes) (fetched)
+edwardsburg: 20 events (0 in territory, 20 dupes) (fetched)
+elkhart: 19 events (0 in territory, 19 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20261002T100002Z.manifest.json
+manifest sha256: 99a5310c55cbee40ff43258e327d25ff7a1e9629c847909c57b44fa28addb969
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 40,
+  "events_upserted": 1,
+  "in_territory": 23,
+  "report_only": 17,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+benton-harbor: 11 events (8 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 11 events (0 in territory, 11 dupes) (fetched)
+niles: 26 events (13 in territory, 9 dupes) (fetched)
+buchanan: 29 events (1 in territory, 26 dupes) (fetched)
+berrien-springs: 25 events (0 in territory, 25 dupes) (fetched)
+coloma: 13 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 16 events (0 in territory, 11 dupes) (fetched)
+south-bend: 25 events (0 in territory, 24 dupes) (fetched)
+mishawaka: 21 events (0 in territory, 21 dupes) (fetched)
+granger: 21 events (0 in territory, 21 dupes) (fetched)
+dowagiac: 23 events (0 in territory, 23 dupes) (fetched)
+edwardsburg: 20 events (0 in territory, 20 dupes) (fetched)
+elkhart: 19 events (0 in territory, 19 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20261003T100004Z.manifest.json
+manifest sha256: 8049de073abbdceb1518bda7ef626bd449ef87ece40a9f07be0927a5b1d06996
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 40,
+  "events_upserted": 3,
+  "in_territory": 22,
+  "report_only": 18,
+  "engine_called": 0,
+  "engine_ok": 0
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 10 events (8 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 10 events (0 in territory, 10 dupes) (fetched)
+niles: 25 events (12 in territory, 9 dupes) (fetched)
+buchanan: 28 events (1 in territory, 25 dupes) (fetched)
+berrien-springs: 25 events (0 in territory, 25 dupes) (fetched)
+coloma: 11 events (0 in territory, 9 dupes) (fetched)
+new-buffalo: 16 events (0 in territory, 11 dupes) (fetched)
+south-bend: 24 events (0 in territory, 23 dupes) (fetched)
+mishawaka: 20 events (0 in territory, 20 dupes) (fetched)
+granger: 20 events (0 in territory, 20 dupes) (fetched)
+dowagiac: 22 events (0 in territory, 21 dupes) (fetched)
+edwardsburg: 19 events (0 in territory, 19 dupes) (fetched)
+elkhart: 18 events (0 in territory, 18 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20261004T100000Z.manifest.json
+manifest sha256: 0bb66045920a3f866a3d92da119426a0ced9ea60dba430f9f2cfd0573f8074a9
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 38,
+  "events_upserted": 2,
+  "in_territory": 21,
+  "report_only": 17,
+  "engine_called": 21,
+  "engine_ok": 21
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 11 events (8 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 11 events (0 in territory, 11 dupes) (fetched)
+niles: 24 events (9 in territory, 10 dupes) (fetched)
+buchanan: 27 events (1 in territory, 23 dupes) (fetched)
+berrien-springs: 24 events (0 in territory, 24 dupes) (fetched)
+coloma: 12 events (0 in territory, 9 dupes) (fetched)
+new-buffalo: 16 events (0 in territory, 11 dupes) (fetched)
+south-bend: 24 events (0 in territory, 23 dupes) (fetched)
+mishawaka: 19 events (0 in territory, 19 dupes) (fetched)
+granger: 19 events (0 in territory, 19 dupes) (fetched)
+dowagiac: 23 events (0 in territory, 22 dupes) (fetched)
+edwardsburg: 19 events (0 in territory, 19 dupes) (fetched)
+elkhart: 18 events (0 in territory, 18 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20261005T100002Z.manifest.json
+manifest sha256: 8736ff3d8ce957bd4916c8bc81edd5493dd4a74bc4d737a504cbd1570c5b0c93
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 39,
+  "events_upserted": 4,
+  "in_territory": 18,
+  "report_only": 21,
+  "engine_called": 18,
+  "engine_ok": 18
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 12 events (8 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 11 events (0 in territory, 11 dupes) (fetched)
+niles: 25 events (9 in territory, 10 dupes) (fetched)
+buchanan: 29 events (2 in territory, 24 dupes) (fetched)
+berrien-springs: 25 events (0 in territory, 25 dupes) (fetched)
+coloma: 13 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 17 events (0 in territory, 12 dupes) (fetched)
+south-bend: 25 events (0 in territory, 24 dupes) (fetched)
+mishawaka: 20 events (0 in territory, 20 dupes) (fetched)
+granger: 20 events (0 in territory, 20 dupes) (fetched)
+dowagiac: 23 events (0 in territory, 22 dupes) (fetched)
+edwardsburg: 20 events (0 in territory, 20 dupes) (fetched)
+elkhart: 20 events (0 in territory, 19 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20261006T100001Z.manifest.json
+manifest sha256: 59bb8cadc62304b72cc5cf968d012d916e221f626e133f1577da2523101f4f6d
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 43,
+  "events_upserted": 4,
+  "in_territory": 19,
+  "report_only": 24,
+  "engine_called": 19,
+  "engine_ok": 19
+}
+DB_AUTHORITY=efxowqudmsfqjmbeidjc class=PRODUCTION source=DEEDSONAR_DATABASE_URL
+engine: http://127.0.0.1:8410 healthy, db up
+benton-harbor: 12 events (8 in territory, 0 dupes) (fetched)
+saint-joseph-mi: 11 events (0 in territory, 11 dupes) (fetched)
+niles: 26 events (10 in territory, 10 dupes) (fetched)
+buchanan: 30 events (2 in territory, 25 dupes) (fetched)
+berrien-springs: 26 events (0 in territory, 26 dupes) (fetched)
+coloma: 14 events (0 in territory, 10 dupes) (fetched)
+new-buffalo: 18 events (0 in territory, 13 dupes) (fetched)
+south-bend: 26 events (0 in territory, 25 dupes) (fetched)
+mishawaka: 21 events (0 in territory, 21 dupes) (fetched)
+granger: 21 events (0 in territory, 21 dupes) (fetched)
+dowagiac: 24 events (0 in territory, 23 dupes) (fetched)
+edwardsburg: 21 events (0 in territory, 21 dupes) (fetched)
+elkhart: 23 events (0 in territory, 20 dupes) (fetched)
+
+manifest: /Users/jeramiehicks/Neuruh/Neuruh/NeuruhAI/recipe-engine/data/manifests/run_daily-20261007T100003Z.manifest.json
+manifest sha256: c31fe8384f14b8cc48dd8d1c4e02e5043ea0ae1c58edb7e84db7e44cd5f83841
+{
+  "anchors": 13,
+  "pages_fetched": 13,
+  "cache_hits": 0,
+  "events_seen": 47,
+  "events_upserted": 4,
+  "in_territory": 20,
+  "report_only": 27,
+  "engine_called": 20,
+  "engine_ok": 20
+}
