@@ -10,7 +10,11 @@ import time
 
 import pytest
 
-from recipe_engine.founder_runtime.api.auth import generate_token
+import secrets
+
+from recipe_engine.founder_runtime.api.auth import (
+    ENV_FOUNDER_IDENTITY, ENV_FOUNDER_TOKEN_SHA256, founder_token_sha256, generate_token,
+)
 from recipe_engine.founder_runtime.api.client import FounderRuntimeClient
 from recipe_engine.founder_runtime.api.service import MissionService
 
@@ -35,6 +39,24 @@ def token() -> str:
 
 
 @pytest.fixture()
+def founder_token() -> str:
+    """The founder credential for test servers. FR only ever sees its sha256 (G-1)."""
+    return "frf_" + secrets.token_urlsafe(32)
+
+
+FOUNDER_TEST_IDENTITY = "jeramie"
+
+
+def _configure_founder(founder_token: str | None, identity: str = FOUNDER_TEST_IDENTITY) -> None:
+    if founder_token is None:
+        os.environ.pop(ENV_FOUNDER_TOKEN_SHA256, None)
+        os.environ.pop(ENV_FOUNDER_IDENTITY, None)
+    else:
+        os.environ[ENV_FOUNDER_TOKEN_SHA256] = founder_token_sha256(founder_token)
+        os.environ[ENV_FOUNDER_IDENTITY] = identity
+
+
+@pytest.fixture()
 def service(tmp_path):
     db = str(tmp_path / "missions.sqlite")
     svc = MissionService(db)
@@ -43,7 +65,7 @@ def service(tmp_path):
 
 
 @pytest.fixture()
-def server_factory(tmp_path, token):
+def server_factory(tmp_path, token, founder_token):
     """Start a loopback server AFTER the caller has arranged the environment.
 
     ``running_server`` builds its app during fixture setup, so a test that sets
@@ -57,10 +79,12 @@ def server_factory(tmp_path, token):
     from recipe_engine.founder_runtime.api.app import create_app
     started = []
 
-    def start(name: str = "missions"):
+    def start(name: str = "missions", *, founder_configured: bool = True,
+              founder_identity: str = FOUNDER_TEST_IDENTITY):
         port = _free_port()
         db = str(tmp_path / f"{name}.sqlite")
         os.environ["FR_API_OPERATOR_TOKEN"] = token
+        _configure_founder(founder_token if founder_configured else None, founder_identity)
         app = create_app(db, probe_live=False)
         cfg = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
         server = uvicorn.Server(cfg)
@@ -83,7 +107,7 @@ def server_factory(tmp_path, token):
 
 
 @pytest.fixture()
-def running_server(tmp_path, token):
+def running_server(tmp_path, token, founder_token):
     """Start a real loopback uvicorn server; yield (client, port)."""
     pytest.importorskip("fastapi", reason="HTTP transport requires fastapi")
     uvicorn = pytest.importorskip("uvicorn", reason="HTTP transport requires uvicorn")
@@ -91,6 +115,7 @@ def running_server(tmp_path, token):
     port = _free_port()
     db = str(tmp_path / "missions.sqlite")
     os.environ["FR_API_OPERATOR_TOKEN"] = token
+    _configure_founder(founder_token)
     app = create_app(db, probe_live=False)
     cfg = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(cfg)

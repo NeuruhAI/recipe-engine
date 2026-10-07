@@ -94,7 +94,10 @@ _POLICIES = (
     # T31B: the authority grant on /v2/authorize. A bounded, declared timeout is
     # part of failing closed — an authority organ that never answers must become
     # a denial at a known moment, not an open-ended wait.
-    _p("governance", "authorize", 4_000),
+    # The authority question is asked once per resolve and a timeout parks the
+    # mission fail-closed; the live surface answers in milliseconds but has
+    # stalled past 4s under host load, so the ceiling admits a longer ask.
+    _p("governance", "authorize", 4_000, ceiling_ms=10_000),
     _p("axon_readonly", "identity", 5_000),
     _p("axon_readonly", "tools_census", 5_000),
     _p(

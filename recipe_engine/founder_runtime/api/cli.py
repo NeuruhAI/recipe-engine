@@ -1,6 +1,12 @@
 """Operator CLI for the Founder Runtime API. Never prints the operator token.
 
 Token resolution order: --token-env NAME (reads that env var) -> FR_API_OPERATOR_TOKEN.
+
+G-1: ``approve`` and ``approve-gate`` are founder decisions. This CLI holds only
+the operator token, which the approve routes refuse, so those two commands exit
+2 and point to ``neuruh-approve`` (founder credential read from the login
+Keychain at call time). Rejections still work with the operator token and are
+recorded as decided_by "operator".
 """
 
 from __future__ import annotations
@@ -26,6 +32,12 @@ def _resolve_token(args) -> str:
               file=sys.stderr)
         raise SystemExit(2)
     return tok
+
+
+FOUNDER_ONLY_MESSAGE = (
+    "error: approvals are founder decisions and this CLI holds only the operator token, "
+    "which the approve routes refuse (403 OPERATOR_TOKEN_NOT_FOUNDER). Use: "
+    "neuruh-approve <mission_id> [--gate] --reason \"...\"")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -124,20 +136,16 @@ def main(argv: list[str] | None = None) -> int:
             for ev in client.stream_events(args.mission, after=args.after):
                 _print(ev)
         elif args.command == "approve":
-            ver = args.expected_version
-            if ver is None:
-                ver = _current_version(client, args.mission)
-            _print(client.approve(args.mission, reason=args.reason, expected_version=ver))
+            print(FOUNDER_ONLY_MESSAGE, file=sys.stderr)
+            return 2
         elif args.command == "reject":
             ver = args.expected_version
             if ver is None:
                 ver = _current_version(client, args.mission)
             _print(client.reject(args.mission, reason=args.reason, expected_version=ver))
         elif args.command == "approve-gate":
-            ver = args.expected_version
-            if ver is None:
-                ver = _current_version(client, args.mission)
-            _print(client.approve_gate(args.mission, reason=args.reason, expected_version=ver))
+            print(FOUNDER_ONLY_MESSAGE, file=sys.stderr)
+            return 2
         elif args.command == "reject-gate":
             ver = args.expected_version
             if ver is None:

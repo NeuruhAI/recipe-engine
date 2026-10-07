@@ -1,0 +1,366 @@
+{
+  "fixture_id": "p1_independent_eligibility_one_property_four_recipes",
+  "mission_id": "NEURUH-RECIPE-P1-INDEPENDENT-ELIGIBILITY-20260908",
+  "notice": "SYNTHETIC FIXTURE. One property, four recipe versions evaluated independently. Recipe A (published_tax_distress) = MATCH; Recipe B (stalled_tax_foreclosure_heirship) = NO_MATCH on decisive negative docket evidence; Recipe C (open_probate_property) = UNKNOWN on an inconclusive probate index search; Recipe D (long_term_absentee_potential_equity) = second MATCH on the same asset. Nothing here is a live finding, a candidate mint, a lead, or contact authority.",
+  "recipe_labels": {
+    "A": "published_tax_distress",
+    "B": "stalled_tax_foreclosure_heirship",
+    "C": "open_probate_property",
+    "D": "long_term_absentee_potential_equity"
+  },
+  "context": {
+    "schema_version": "neuruh.recipe-engine.eligibility-context.v1",
+    "mode": "FIXTURE",
+    "tenant_id": "fixture-tenant",
+    "universe_id": "fixture-universe-nc-wake",
+    "opportunity_id": "candidate-willow-120",
+    "asset_id": "parcel-37183-0123456",
+    "as_of": "2026-09-08T01:00:00Z",
+    "evidence": [
+      {
+        "evidence_id": "ev-tax-roll-2026",
+        "source_id": "wake-county-tax-roll-2026-09-07",
+        "source_family": "COUNTY_TAX_ROLL",
+        "content_sha256": "dc1e7d30b6630b8bd18a0cef1d34130ecf4f812d5a3a80f60f5a7f12bf2594c9",
+        "observed_at": "2026-09-07T12:00:00Z",
+        "ledger_state": "BOUND",
+        "ledger_ref": "fixture-ledger:ev-tax-roll-2026",
+        "withdrawn_at": null,
+        "media_type": "application/json"
+      },
+      {
+        "evidence_id": "ev-parcel-roll-2026",
+        "source_id": "wake-county-parcel-roll-2026-09-01",
+        "source_family": "COUNTY_PARCEL_ROLL",
+        "content_sha256": "4fefe1c48d5980aa1e97179f82d0ea727054e42fb3a92cffe196f23d0d07a890",
+        "observed_at": "2026-09-01T06:00:00Z",
+        "ledger_state": "BOUND",
+        "ledger_ref": "fixture-ledger:ev-parcel-roll-2026",
+        "withdrawn_at": null,
+        "media_type": "application/json"
+      },
+      {
+        "evidence_id": "ev-docket-search-2026",
+        "source_id": "wake-county-foreclosure-docket-search-2026-09-06",
+        "source_family": "COUNTY_FORECLOSURE_DOCKET",
+        "content_sha256": "9ec2d7cba3f2e854bd49753c14100f024305a3f27e38f50e2639c4d36a945f65",
+        "observed_at": "2026-09-06T18:30:00Z",
+        "ledger_state": "BOUND",
+        "ledger_ref": "fixture-ledger:ev-docket-search-2026",
+        "withdrawn_at": null,
+        "media_type": "application/json"
+      },
+      {
+        "evidence_id": "ev-probate-index-2026",
+        "source_id": "wake-county-probate-index-search-2026-09-05",
+        "source_family": "PUBLIC_PROBATE_INDEX",
+        "content_sha256": "d798e3f80b1d173818e2fb9a00c81838dd6cbb2f688c9063ba3a6443bb4b587c",
+        "observed_at": "2026-09-05T09:15:00Z",
+        "ledger_state": "BOUND",
+        "ledger_ref": "fixture-ledger:ev-probate-index-2026",
+        "withdrawn_at": null,
+        "media_type": "application/json"
+      }
+    ],
+    "signals": [
+      {
+        "signal_id": "sig-tax-delinquent",
+        "signal_type": "tax_delinquent",
+        "state": "PRESENT",
+        "confidence": "HIGH",
+        "evidence_refs": [
+          "ev-tax-roll-2026"
+        ],
+        "source_families": [
+          "COUNTY_TAX_ROLL"
+        ],
+        "observed_at": "2026-09-07T12:00:00Z",
+        "note": "Synthetic fixture: 2024-2025 taxes published delinquent."
+      },
+      {
+        "signal_id": "sig-absentee-owner",
+        "signal_type": "absentee_owner",
+        "state": "PRESENT",
+        "confidence": "MEDIUM",
+        "evidence_refs": [
+          "ev-parcel-roll-2026"
+        ],
+        "source_families": [
+          "COUNTY_PARCEL_ROLL"
+        ],
+        "observed_at": "2026-09-01T06:00:00Z",
+        "note": "Synthetic fixture: owner mailing state differs from situs."
+      },
+      {
+        "signal_id": "sig-long-hold",
+        "signal_type": "long_hold",
+        "state": "PRESENT",
+        "confidence": "MEDIUM",
+        "evidence_refs": [
+          "ev-parcel-roll-2026"
+        ],
+        "source_families": [
+          "COUNTY_PARCEL_ROLL"
+        ],
+        "observed_at": "2026-09-01T06:00:00Z",
+        "note": "Synthetic fixture: recorded vesting 1998."
+      },
+      {
+        "signal_id": "sig-government-owner",
+        "signal_type": "government_owner",
+        "state": "ABSENT",
+        "confidence": "HIGH",
+        "evidence_refs": [
+          "ev-parcel-roll-2026"
+        ],
+        "source_families": [
+          "COUNTY_PARCEL_ROLL"
+        ],
+        "observed_at": "2026-09-01T06:00:00Z",
+        "note": "Synthetic fixture: owner class individual, not a public body."
+      },
+      {
+        "signal_id": "sig-pre-foreclosure",
+        "signal_type": "pre_foreclosure",
+        "state": "ABSENT",
+        "confidence": "HIGH",
+        "evidence_refs": [
+          "ev-docket-search-2026"
+        ],
+        "source_families": [
+          "COUNTY_FORECLOSURE_DOCKET"
+        ],
+        "observed_at": "2026-09-06T18:30:00Z",
+        "note": "Synthetic fixture: docket searched by parcel and owner; no filing."
+      },
+      {
+        "signal_id": "sig-probate-or-estate",
+        "signal_type": "probate_or_estate",
+        "state": "UNKNOWN",
+        "confidence": "UNKNOWN",
+        "evidence_refs": [
+          "ev-probate-index-2026"
+        ],
+        "source_families": [
+          "PUBLIC_PROBATE_INDEX"
+        ],
+        "observed_at": "2026-09-05T09:15:00Z",
+        "note": "Synthetic fixture: public index search inconclusive (SEARCH_INCONCLUSIVE)."
+      }
+    ]
+  },
+  "policies": {
+    "A": {
+      "schema_version": "neuruh.recipe-engine.eligibility-policy.v1",
+      "tenant_id": "fixture-tenant",
+      "recipe_id": "published_tax_distress",
+      "recipe_version_id": "published_tax_distress@elig.1",
+      "version": "1",
+      "validity_seconds": 86400,
+      "clauses": [
+        {
+          "clause_id": "not_government_owned",
+          "signal_type": "government_owner",
+          "expect": "ABSENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "HIGH",
+          "max_age_seconds": null
+        },
+        {
+          "clause_id": "tax_present",
+          "signal_type": "tax_delinquent",
+          "expect": "PRESENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "MEDIUM",
+          "max_age_seconds": null
+        }
+      ],
+      "composition": {
+        "ingredients": [
+          "COUNTY_TAX_ROLL",
+          "COUNTY_PARCEL_ROLL"
+        ],
+        "policy_contract": "neuruh.recipe-engine.eligibility-policy.v1"
+      },
+      "policy_digest": "f791facb6c06a6c316c187f4381e2f3d802a4f05bf044e2288c33ee70b5b80af",
+      "composition_digest": "8b6c75b155583d278876667f11e7ec4b38bf7a98cfa19062b31bc9b44835e078"
+    },
+    "B": {
+      "schema_version": "neuruh.recipe-engine.eligibility-policy.v1",
+      "tenant_id": "fixture-tenant",
+      "recipe_id": "stalled_tax_foreclosure_heirship",
+      "recipe_version_id": "stalled_tax_foreclosure_heirship@elig.1",
+      "version": "1",
+      "validity_seconds": 86400,
+      "clauses": [
+        {
+          "clause_id": "estate_present",
+          "signal_type": "probate_or_estate",
+          "expect": "PRESENT",
+          "negative_evidence_decisive": false,
+          "min_confidence": "LOW",
+          "max_age_seconds": null
+        },
+        {
+          "clause_id": "foreclosure_present",
+          "signal_type": "pre_foreclosure",
+          "expect": "PRESENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "MEDIUM",
+          "max_age_seconds": null
+        },
+        {
+          "clause_id": "not_government_owned",
+          "signal_type": "government_owner",
+          "expect": "ABSENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "HIGH",
+          "max_age_seconds": null
+        }
+      ],
+      "composition": {
+        "ingredients": [
+          "COUNTY_FORECLOSURE_DOCKET",
+          "PUBLIC_PROBATE_INDEX",
+          "COUNTY_PARCEL_ROLL"
+        ],
+        "policy_contract": "neuruh.recipe-engine.eligibility-policy.v1"
+      },
+      "policy_digest": "6c333211c4f4fa1bf4ed7cb52ee3be1570162f143f2cf931406739f2cb057d61",
+      "composition_digest": "d42c2728c0ad6ed105468ed06fbeffbd8c4a4cba7ca59101e94c69bf3197e968"
+    },
+    "C": {
+      "schema_version": "neuruh.recipe-engine.eligibility-policy.v1",
+      "tenant_id": "fixture-tenant",
+      "recipe_id": "open_probate_property",
+      "recipe_version_id": "open_probate_property@elig.1",
+      "version": "1",
+      "validity_seconds": 86400,
+      "clauses": [
+        {
+          "clause_id": "estate_present",
+          "signal_type": "probate_or_estate",
+          "expect": "PRESENT",
+          "negative_evidence_decisive": false,
+          "min_confidence": "LOW",
+          "max_age_seconds": null
+        },
+        {
+          "clause_id": "not_government_owned",
+          "signal_type": "government_owner",
+          "expect": "ABSENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "HIGH",
+          "max_age_seconds": null
+        }
+      ],
+      "composition": {
+        "ingredients": [
+          "PUBLIC_PROBATE_INDEX",
+          "COUNTY_PARCEL_ROLL"
+        ],
+        "policy_contract": "neuruh.recipe-engine.eligibility-policy.v1"
+      },
+      "policy_digest": "65dbc69cfa727f150f359ffb8cef7cbf664c6d5b7e38c5fbd51fba10872a8543",
+      "composition_digest": "683b42730b7dc1efc6ebe3978fb2106b98c9e2bf5610db37a431cf31ddfdde7e"
+    },
+    "D": {
+      "schema_version": "neuruh.recipe-engine.eligibility-policy.v1",
+      "tenant_id": "fixture-tenant",
+      "recipe_id": "long_term_absentee_potential_equity",
+      "recipe_version_id": "long_term_absentee_potential_equity@elig.1",
+      "version": "1",
+      "validity_seconds": 86400,
+      "clauses": [
+        {
+          "clause_id": "absentee_present",
+          "signal_type": "absentee_owner",
+          "expect": "PRESENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "MEDIUM",
+          "max_age_seconds": 2592000
+        },
+        {
+          "clause_id": "long_hold_present",
+          "signal_type": "long_hold",
+          "expect": "PRESENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "LOW",
+          "max_age_seconds": null
+        },
+        {
+          "clause_id": "not_government_owned",
+          "signal_type": "government_owner",
+          "expect": "ABSENT",
+          "negative_evidence_decisive": true,
+          "min_confidence": "HIGH",
+          "max_age_seconds": null
+        }
+      ],
+      "composition": {
+        "ingredients": [
+          "COUNTY_PARCEL_ROLL"
+        ],
+        "policy_contract": "neuruh.recipe-engine.eligibility-policy.v1"
+      },
+      "policy_digest": "61f2cb5b4c235d42a8a92447b2fe165b9519525f2a188b588d196166705e1cb6",
+      "composition_digest": "9a79e42789129b1a2db19dd10eb778946da7620fd5ecb0990a6eee5602fdba0c"
+    }
+  },
+  "expected": {
+    "long_term_absentee_potential_equity": {
+      "decision": "MATCH",
+      "content_sha256": "9235c77dfb656db63940c2ef323334a74b1d67b183a3761289d673ac4b2cc715",
+      "intake_content_sha256": "c7032dc7bbe500403aa68239f75660d57cb63f0c0003615b7307aadb2cd617c5",
+      "membership_key": "20227d8f5544ba5fce51bf4a32628b7dc49fbdaee1b48585f1ab65d235772fb4",
+      "policy_digest": "61f2cb5b4c235d42a8a92447b2fe165b9519525f2a188b588d196166705e1cb6",
+      "composition_digest": "9a79e42789129b1a2db19dd10eb778946da7620fd5ecb0990a6eee5602fdba0c",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "valid_until": "2026-09-09T01:00:00Z",
+      "evidence_ids_used": [
+        "ev-parcel-roll-2026"
+      ]
+    },
+    "open_probate_property": {
+      "decision": "UNKNOWN",
+      "content_sha256": "823617fc347905fd2b5f054816d4540baa9863f7c9f4a155c2b3eb1595f4c3f2",
+      "intake_content_sha256": "f89d86547b90e960c82ce0a5a65490d3695246ad6800fb00b06800e17a22f699",
+      "membership_key": "363b5ceeb678c3c1ec40809812f39ad3cd35f177feddb94e09088af1a96598c7",
+      "policy_digest": "65dbc69cfa727f150f359ffb8cef7cbf664c6d5b7e38c5fbd51fba10872a8543",
+      "composition_digest": "683b42730b7dc1efc6ebe3978fb2106b98c9e2bf5610db37a431cf31ddfdde7e",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "valid_until": "2026-09-09T01:00:00Z",
+      "evidence_ids_used": [
+        "ev-parcel-roll-2026"
+      ]
+    },
+    "published_tax_distress": {
+      "decision": "MATCH",
+      "content_sha256": "94c1197ce62d6d5782fe1dd20c3219cb6830547b4fb000be2b30decfcb65485d",
+      "intake_content_sha256": "224fc06350559a5afcf1c5f6f50cbec20cce2bb6ba43f14111358d2aeff45088",
+      "membership_key": "4a91fe6436fe8a32ca5d313adb95631e306fce238d03cccc64330b76fc6f6428",
+      "policy_digest": "f791facb6c06a6c316c187f4381e2f3d802a4f05bf044e2288c33ee70b5b80af",
+      "composition_digest": "8b6c75b155583d278876667f11e7ec4b38bf7a98cfa19062b31bc9b44835e078",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "valid_until": "2026-09-09T01:00:00Z",
+      "evidence_ids_used": [
+        "ev-parcel-roll-2026",
+        "ev-tax-roll-2026"
+      ]
+    },
+    "stalled_tax_foreclosure_heirship": {
+      "decision": "NO_MATCH",
+      "content_sha256": "d6a03a7365512e32c798012f9e6a457e6111f780ea669681efee2ac7d1887255",
+      "intake_content_sha256": "1b674b68c6e9dba165492f09e4b09847ff0f8eb860acb81145e4e5a39520d5b3",
+      "membership_key": "92678bc2847082e2039b9f52f3bd3828db8dc373563e8daa82c51a5ad55f9c86",
+      "policy_digest": "6c333211c4f4fa1bf4ed7cb52ee3be1570162f143f2cf931406739f2cb057d61",
+      "composition_digest": "d42c2728c0ad6ed105468ed06fbeffbd8c4a4cba7ca59101e94c69bf3197e968",
+      "context_digest": "181bb6f673b3d1cc76554c84134c295eaa2c8cbe61c372a0b02f77802350165d",
+      "valid_until": "2026-09-09T01:00:00Z",
+      "evidence_ids_used": [
+        "ev-docket-search-2026",
+        "ev-parcel-roll-2026"
+      ]
+    }
+  }
+}

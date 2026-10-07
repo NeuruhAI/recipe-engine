@@ -40,7 +40,7 @@ cd ~/repos/recipe-engine
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill real values
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/010_recipe_schema.sql
+psql "$DEEDSONAR_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/010_recipe_schema.sql
 ```
 
 ## Run
@@ -52,8 +52,24 @@ python3 run.py               # full pipeline
 python3 run.py --no-engine   # scrape + persist only
 ```
 
-Exit codes: 0 ok · 1 config/env · 2 zero events (parse failure) ·
-3 node fork · 4 engine call failures (run completed, see manifest).
+Exit codes: 0 ok · 1 config/env (including a refused database) · 2 zero
+events (parse failure) · 3 node fork · 4 engine call failures (run completed,
+see manifest) · 5 write targets unready (the resolved database lacks the
+`recipe` unique keys; nothing written).
+
+## Database authority
+
+Every write in this repo resolves through `recipe_engine/db_authority.py`:
+`DEEDSONAR_DATABASE_URL` (DeedSonar production, `efxowqudmsfqjmbeidjc`) wins;
+the legacy-named `DATABASE_URL` is a fallback only. The retired spine
+`lvdimujkfheeyqchjzra` is refused wherever it appears, as is any other
+Supabase project; a loopback host is a local court database. Before the first
+upsert, `run.py` proves the resolved database carries the unique keys its
+`ON CONFLICT` clauses need and exits 5 otherwise.
+
+```bash
+python3 run.py --print-authority   # read-only: which DB, is it write-ready
+```
 
 ## Autonomy core (candidate)
 
@@ -93,6 +109,22 @@ Recipe Engine owns the versioned, portable policy sent to LandOS:
 - signal/property population: `neuruh.opportunity-intelligence.property-population.v1`
 - LandOS result: `neuruh.opportunity-intelligence.result.v1`
 - canonical recipe: `land_acquisition_explainable@1.0.0`
+
+## Independent eligibility receipts (Astra P1)
+
+Beside the primary ranking feed, `recipe_engine.opportunity_intelligence.eligibility`
+evaluates one candidate independently against each requested recipe version and
+emits an immutable `MATCH` / `NO_MATCH` / `UNKNOWN` receipt. UNKNOWN never
+becomes NO_MATCH; rank, score and primary_recipe are refused as inputs.
+
+- policy: `neuruh.recipe-engine.eligibility-policy.v1`
+- context: `neuruh.recipe-engine.eligibility-context.v1`
+- receipt: `neuruh.recipe-engine.eligibility-receipt.v1` (projects onto the
+  lead-recipe-os intake contract with a byte-compatible hash)
+- ruling and proofs: `docs/P1_INDEPENDENT_ELIGIBILITY_PRODUCER_RULING.md`,
+  `scripts/p1_independent_eligibility_proof.py`
+- thin CLI (P1B harness bind; stdout JSONL, no daemon/store):
+  `python scripts/run_independent_eligibility.py --fixture tests/opportunity_intelligence/fixtures/p1_independent_eligibility.json`
 - score: `landos.opportunity-score.v1`
 
 The recipe contains only declared rules and integer deltas. LandOS returns the
@@ -103,6 +135,14 @@ The population contract separately names raw `signal_observation_count` and
 deduped `property_count`. Its source-factory compatibility court preserves the
 accepted `source_factory.run_receipt.v1` 14,233-signal / 6,052-property rollup
 and one 23-observation Wake property without scoring the repeated rows 23 times.
+
+**Seam status (do not invent PASS):** `--landos-root` in-process
+`evaluate_opportunity` against landos-engine `1779abf` is **LIVE / PASSED**
+(`verification_sha256` `ab75e4df…`; receipt `docs/courts/landos-evaluate-1779abf.json`).
+LIVE HTTP `POST /v1/opportunity-intelligence/evaluate` is **UNWIRED** in this
+environment. UNKNOWN is not treated as 0. Details:
+`docs/OPPORTUNITY_INTELLIGENCE_LANDOS_SEAM.md` and
+`docs/courts/live-shape-receipt.md`.
 
 Run the cross-repo court without writing a log or manifest:
 

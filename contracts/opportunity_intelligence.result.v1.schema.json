@@ -30,16 +30,79 @@
     "subject_id": {"type": "string", "minLength": 1},
     "genome_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "caller_top_level_extensions": {"type": "object"},
+    "recipe": {
+      "type": "object",
+      "required": ["recipe_id", "version", "config_digest", "score_version"],
+      "properties": {
+        "recipe_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "score_version": {"const": "landos.opportunity-score.v1"}
+      },
+      "additionalProperties": true
+    },
     "property_population": {
       "$ref": "opportunity_intelligence.property_population.v1.schema.json"
     },
+    "stacked_signals": {
+      "type": "object",
+      "required": [
+        "observation_count",
+        "raw_observations",
+        "normalized_factors",
+        "unrecognized_observations"
+      ],
+      "properties": {
+        "observation_count": {"type": "integer", "minimum": 0},
+        "raw_observations": {"type": "array"},
+        "normalized_factors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["factor_id", "state", "delta"],
+            "properties": {
+              "factor_id": {"type": "string", "minLength": 1},
+              "state": {"enum": ["PRESENT", "ABSENT", "UNKNOWN", "CONFLICTED"]},
+              "delta": {"type": "integer"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "unrecognized_observations": {"type": "array"}
+      },
+      "additionalProperties": true
+    },
     "opportunity_score": {
       "type": "object",
-      "required": ["score_version", "formula", "score", "components"]
+      "required": ["score_version", "formula", "score", "components"],
+      "properties": {
+        "score_version": {"const": "landos.opportunity-score.v1"},
+        "formula": {"type": "string", "minLength": 1},
+        "score": {"type": "integer"},
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["factor_id", "state", "delta"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
     },
     "confidence_score": {
       "type": "object",
       "required": ["score", "formula", "components"]
+    },
+    "explanation": {
+      "type": "object",
+      "required": [
+        "why",
+        "positive_factors",
+        "negative_factors",
+        "unknown_material_factors"
+      ],
+      "additionalProperties": true
     },
     "receipt": {
       "type": "object",

@@ -8,6 +8,13 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from recipe_engine.closed_loop.identity import digest
+from recipe_engine.opportunity_intelligence.oppack_receipts import (
+    DEFAULT_RANKING_VERSION,
+    DEFAULT_RECIPE_VERSION,
+    _parse_contributions,
+)
+
 
 def truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
@@ -20,6 +27,42 @@ def num(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+
+SCORE_NAME = "curative_priority_score"
+SCORE_SEMANTICS = "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY"
+
+
+def _recipe_version_of(row: dict[str, Any]) -> str:
+    version = str(row.get("recipe_version") or "").strip()
+    return version or DEFAULT_RECIPE_VERSION
+
+
+def _ranking_version_of(row: dict[str, Any]) -> str:
+    version = str(row.get("scoring_version") or row.get("ranking_version") or "").strip()
+    return version or DEFAULT_RANKING_VERSION
+
+
+def _recipe_partition_key(row: dict[str, Any]) -> tuple[str, str]:
+    return (str(row.get("recipe_id") or ""), _recipe_version_of(row))
+
+
+def _ranking_universe_id(rows: list[dict[str, Any]]) -> str:
+    payload = {
+        "ranking_version": DEFAULT_RANKING_VERSION,
+        "recipe_version": DEFAULT_RECIPE_VERSION,
+        "members": [
+            [
+                str(row.get("county_fips") or ""),
+                str(row.get("parcel_apn") or ""),
+                str(row.get("recipe_id") or ""),
+                int(row["curative_priority_score"]),
+            ]
+            for row in rows
+        ],
+    }
+    return digest(payload)
 
 
 def integer(value: Any) -> int | None:
@@ -145,6 +188,59 @@ def recipe(row: dict[str, Any]) -> tuple[str, str]:
     return "published_tax_distress", "ENRICHMENT"
 
 
+# The ladder in ``recipe`` is first-match-wins: it returns exactly ONE recipe
+# id per row and silently discards every other branch whose predicate is also
+# true.  ``recipe_matches`` enumerates the SAME predicates in the SAME order
+# without collapsing them.  It adds no predicate, no weight and no score;
+# ``recipe_matches(row)[0] == recipe(row)[0]`` for every row, by construction.
+#
+# ``published_tax_distress`` is the ladder's unconditional fallthrough, not a
+# positive predicate, so it is a match only when no positive branch fires.
+# Deriving it from ``source_types`` or from a score factor would be a new
+# recipe predicate and is refused here.
+RECIPE_LADDER: tuple[tuple[str, str], ...] = (
+    ("stalled_tax_foreclosure_heirship", "TITLE_CURATIVE_HEIR"),
+    ("heir_property_acquisition_research", "TITLE_CURATIVE_HEIR"),
+    ("tax_foreclosure_fractional_title", "TITLE_CURATIVE"),
+    ("tax_foreclosure_curative", "TITLE_CURATIVE"),
+    ("fractional_family_ownership", "TITLE_CURATIVE"),
+    ("long_term_absentee_potential_equity", "ACQUISITION_RESEARCH"),
+    ("published_tax_distress", "ENRICHMENT"),
+)
+RECIPE_FALLTHROUGH_ID = "published_tax_distress"
+
+
+def recipe_matches(row: dict[str, Any]) -> list[str]:
+    """Every ladder branch whose predicate holds, in ladder precedence order.
+
+    Position 0 is the primary and equals ``recipe(row)[0]``.  The fallthrough
+    id appears only when no positive branch matched (then it is the sole
+    element), exactly as the ladder would have returned it.
+    """
+    heir = truthy(row.get("heir_indicator"))
+    fragmented = truthy(row.get("fragmented_ownership_indicator"))
+    foreclosure = truthy(row.get("tax_foreclosure_indicator")) or "tax_foreclosure_case" in str(row.get("source_types") or "")
+    out_state = truthy(row.get("out_of_state"))
+    years = integer(row.get("years_owned")) or 0
+
+    predicates = (
+        heir and foreclosure,
+        heir,
+        foreclosure and fragmented,
+        foreclosure,
+        fragmented,
+        out_state and years >= 20,
+    )
+    matches = [
+        recipe_id
+        for (recipe_id, _lane), holds in zip(RECIPE_LADDER[:-1], predicates)
+        if holds
+    ]
+    if not matches:
+        matches.append(RECIPE_FALLTHROUGH_ID)
+    return matches
+
+
 def tier(score: int) -> str:
     if score >= 85:
         return "A"
@@ -157,15 +253,27 @@ def tier(score: int) -> str:
     return "E"
 
 
+def _sort_numeric_key(value: Any) -> tuple[int, float]:
+    """Deterministic numeric tie-break preserving UNKNOWN != known zero."""
+    numeric = num(value)
+    if numeric is None:
+        return 1, 0.0
+    return 0, float(numeric)
+
+
 def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows:
         score, reasons = base_score(row)
         recipe_id, lane = recipe(row)
         t = triggers(row)
-        assessed = num(row.get("assessed_value")) or 0.0
-        tax_balance = num(row.get("tax_balance")) or 0.0
+        assessed = num(row.get("assessed_value"))
+        tax_balance = num(row.get("tax_balance"))
         spread = num(row.get("assessed_value_less_tax"))
+        spread_unknown, spread_value = _sort_numeric_key(row.get("assessed_value_less_tax"))
+        assessed_unknown, assessed_value = _sort_numeric_key(row.get("assessed_value"))
+        tax_unknown, tax_value = _sort_numeric_key(row.get("tax_balance"))
+        years_owned = integer(row.get("years_owned"))
         enriched = dict(row)
         enriched.update({
             "curative_priority_score": score,
@@ -175,7 +283,13 @@ def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "trigger_count": len(t),
             "trigger_classes": "|".join(t),
             "score_reasons": "|".join(reasons),
-            "potential_equity_proxy": "HIGH" if assessed >= 150000 and (integer(row.get("years_owned")) or 0) >= 20 else "MEDIUM" if assessed >= 75000 else "UNKNOWN",
+            "potential_equity_proxy": (
+                "HIGH"
+                if assessed is not None and years_owned is not None and assessed >= 150000 and years_owned >= 20
+                else "MEDIUM"
+                if assessed is not None and assessed >= 75000
+                else "UNKNOWN"
+            ),
             "verified_equity": "",
             "equity_status": row.get("equity_status") or "UNKNOWN_NEEDS_DEBT_SEARCH",
             "phone": "",
@@ -183,25 +297,56 @@ def rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "phone_status": "NOT_ENRICHED",
             "next_research_action": "PULL_DEED_MORTGAGE_LIENS" if score >= 55 else "CONTINUE_PUBLIC_ENRICHMENT",
             "contact_authorized": False,
-            "_sort_spread": spread if spread is not None else -1.0,
-            "_sort_assessed": assessed,
-            "_sort_tax": tax_balance,
+            "_sort_spread_unknown": spread_unknown,
+            "_sort_spread": spread_value,
+            "_sort_assessed_unknown": assessed_unknown,
+            "_sort_assessed": assessed_value,
+            "_sort_tax_unknown": tax_unknown,
+            "_sort_tax": tax_value,
         })
         out.append(enriched)
 
     out.sort(key=lambda r: (
         -int(r["curative_priority_score"]),
         -int(r["trigger_count"]),
+        int(r["_sort_spread_unknown"]),
         -float(r["_sort_spread"]),
+        int(r["_sort_assessed_unknown"]),
         -float(r["_sort_assessed"]),
+        int(r["_sort_tax_unknown"]),
         -float(r["_sort_tax"]),
         str(r.get("county_fips") or ""),
         str(r.get("parcel_apn") or ""),
     ))
+    # `rank` remains GLOBAL_RANK over the full universe. Do not rename it.
+    # recipe_rank is 1-based among recipe_id + recipe_version, same global order.
+    universe_id = _ranking_universe_id(out)
+    membership_totals: Counter[tuple[str, str]] = Counter(_recipe_partition_key(row) for row in out)
+    recipe_seen: Counter[tuple[str, str]] = Counter()
     for idx, row in enumerate(out, 1):
+        key = _recipe_partition_key(row)
+        recipe_seen[key] += 1
         row["rank"] = idx
-        for key in ("_sort_spread", "_sort_assessed", "_sort_tax"):
-            row.pop(key, None)
+        row["global_rank"] = idx
+        row["recipe_rank"] = recipe_seen[key]
+        row["recipe_membership_count"] = membership_totals[key]
+        row["recipe_version"] = _recipe_version_of(row)
+        row["ranking_version"] = _ranking_version_of(row)
+        row["scoring_version"] = _ranking_version_of(row)
+        row["score"] = row["curative_priority_score"]
+        row["score_name"] = SCORE_NAME
+        row["score_semantics"] = SCORE_SEMANTICS
+        row["ranking_universe_id"] = universe_id
+        row["component_contributions"] = json.dumps(_parse_contributions(str(row.get("score_reasons") or "")), separators=(",", ":"), sort_keys=True)
+        for key_name in (
+            "_sort_spread_unknown",
+            "_sort_spread",
+            "_sort_assessed_unknown",
+            "_sort_assessed",
+            "_sort_tax_unknown",
+            "_sort_tax",
+        ):
+            row.pop(key_name, None)
     return out
 
 
@@ -211,7 +356,8 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fields: list[str] | None =
         path.write_text("", encoding="utf-8")
         return
     if fields is None:
-        fields = ["rank"] + [k for k in rows[0].keys() if k != "rank"]
+        leading = [k for k in ("rank", "global_rank", "recipe_rank", "recipe_membership_count") if k in rows[0]]
+        fields = leading + [k for k in rows[0].keys() if k not in leading]
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
@@ -241,8 +387,28 @@ def deedsonar_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "notes": notes,
             "source_url": r.get("source_url"),
             "curative_priority_score": r.get("curative_priority_score"),
+            "score": r.get("score", r.get("curative_priority_score")),
+            "score_name": r.get("score_name", SCORE_NAME),
+            "score_semantics": r.get("score_semantics", SCORE_SEMANTICS),
             "priority_tier": r.get("priority_tier"),
             "recipe_id": r.get("recipe_id"),
+            "global_rank": r.get("global_rank", r.get("rank")),
+            "recipe_rank": r.get("recipe_rank"),
+            "recipe_membership_count": r.get("recipe_membership_count"),
+            "ranking_version": r.get("ranking_version", r.get("scoring_version", "")),
+            "ranking_universe_id": r.get("ranking_universe_id", ""),
+            "score_reasons": r.get("score_reasons"),
+            "component_contributions": r.get("component_contributions", ""),
+            "why_matched_receipt": r.get("why_matched_receipt", ""),
+            "why_ranked_receipt": r.get("why_ranked_receipt", ""),
+            "next_best_evidence_receipt": r.get("next_best_evidence_receipt", ""),
+            "unknown_material_factors": r.get("unknown_material_factors", ""),
+            "contradictions": r.get("contradictions", ""),
+            "source_families": r.get("source_families", ""),
+            "independent_source_family_count": r.get("independent_source_family_count", ""),
+            "input_hash": r.get("input_hash", ""),
+            "scoring_version": r.get("scoring_version", ""),
+            "recipe_version": r.get("recipe_version", ""),
             "trigger_classes": r.get("trigger_classes"),
             "years_owned": r.get("years_owned"),
             "out_of_state": r.get("out_of_state"),

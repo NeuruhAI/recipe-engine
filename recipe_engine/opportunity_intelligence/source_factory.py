@@ -52,9 +52,17 @@ SOURCE_FACTORY_REQUIRED_SIGNAL_FIELDS = (
 # preserved, and unscored as ``source_factory.<source_type>`` observations.
 SOURCE_TYPE_TO_OPPORTUNITY_SIGNAL = {
     "taxdelinquent": "tax_delinquent",
+    "tax_foreclosure_case": "pre_foreclosure",
     "probate": "probate_or_estate",
     "vacancy": "vacancy",
     "code_violation": "code_violation",
+}
+
+TAX_SALE_SOURCE_TYPES = {
+    "taxsale",
+    "tax_sale",
+    "tax_sale_case",
+    "tax_sale_event",
 }
 
 CONFIDENCE_THRESHOLDS = {
@@ -196,9 +204,34 @@ def _assert_receipt_matches_rows(
 
 def _mapped_signal(row: Mapping[str, Any], identity: Mapping[str, str]) -> dict[str, Any]:
     source_type = str(row["source_type"])
+    mapped = source_type in SOURCE_TYPE_TO_OPPORTUNITY_SIGNAL
     signal_type = SOURCE_TYPE_TO_OPPORTUNITY_SIGNAL.get(
         source_type, f"source_factory.{source_type}"
     )
+    if mapped:
+        mapping = {
+            "adapter_contract": SOURCE_FACTORY_ADAPTER_CONTRACT_VERSION,
+            "mapped": True,
+            "join_key_state": "AUTHORIZED_SOURCE_TYPE_MAPPING",
+            "rule": f"{source_type}->{signal_type}",
+        }
+    elif source_type in TAX_SALE_SOURCE_TYPES:
+        mapping = {
+            "adapter_contract": SOURCE_FACTORY_ADAPTER_CONTRACT_VERSION,
+            "mapped": False,
+            "join_key_state": "JOIN_KEY_AUTHORITY_BLOCKED",
+            "rule": (
+                "tax sale evidence preserved unscored until T02 authorizes a "
+                "source_id/source_key -> canonical recipe binding"
+            ),
+        }
+    else:
+        mapping = {
+            "adapter_contract": SOURCE_FACTORY_ADAPTER_CONTRACT_VERSION,
+            "mapped": False,
+            "join_key_state": "NOT_MAPPED_PRESERVED",
+            "rule": "preserve as explicit unscored source_factory signal type",
+        }
     detail = row["detail_json"]
     source_family = str(
         detail.get("source_key") or row.get("source") or source_type
@@ -218,15 +251,7 @@ def _mapped_signal(row: Mapping[str, Any], identity: Mapping[str, str]) -> dict[
         "raw_address": row["raw_address"],
         "source_type": source_type,
         "source_confidence_numeric": deepcopy(row["confidence"]),
-        "mapping": {
-            "adapter_contract": SOURCE_FACTORY_ADAPTER_CONTRACT_VERSION,
-            "mapped": source_type in SOURCE_TYPE_TO_OPPORTUNITY_SIGNAL,
-            "rule": (
-                f"{source_type}->{signal_type}"
-                if source_type in SOURCE_TYPE_TO_OPPORTUNITY_SIGNAL
-                else "preserve as explicit unscored source_factory signal type"
-            ),
-        },
+        "mapping": mapping,
         "source_observation": deepcopy(dict(row)),
     }
 

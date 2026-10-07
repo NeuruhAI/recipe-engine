@@ -264,6 +264,70 @@ class MissionChainIntegrityTests(unittest.TestCase):
         conn.close()
         self.assertFalse(self.store.verify_integrity()["ok"])
 
+    # -- concurrent missions are not a chain break --------------------------
+
+    def test_interleaved_missions_do_not_break_either_chain(self):
+        """Two live missions share one autoincrement, so neither owns a contiguous range.
+
+        Reproduced from a live Founder Runtime store where /v1/missions returned
+        INTEGRITY_FAILURE "sequence_gap" for a mission whose own chain was intact: its
+        events occupied global sequences 161-169 and 180, because a second mission had
+        written 170-179 in between. Verification must judge the mission's own chain,
+        not whether anything else wrote to the table while it was open.
+        """
+        other = self.rt.create_mission_from_text("interleaved", creation_idempotency_key="r2b")
+        for nxt in (MissionState.INTAKE, MissionState.CONTEXT_RESOLUTION):
+            self.rt.transition(other.mission_id, nxt, reason="advance")
+        # subject advances again, so its sequences now straddle the other mission's
+        self.rt.transition(self.mission_id, MissionState.AWAITING_APPROVAL, reason="advance")
+
+        conn = self._raw()
+        subject = [r["sequence"] for r in conn.execute(
+            "SELECT sequence FROM mission_events WHERE mission_id=? ORDER BY sequence",
+            (self.mission_id,))]
+        conn.close()
+        gaps = [b - a for a, b in zip(subject, subject[1:])]
+        self.assertTrue(any(step > 1 for step in gaps),
+                        f"fixture did not interleave; steps={gaps}")
+
+        for mid in (self.mission_id, other.mission_id):
+            result = self.store.verify_mission_chain(mid)
+            self.assertTrue(result["ok"], f"{mid}: {result['issues']}")
+        self.assertTrue(self.store.verify_integrity()["ok"])
+
+    def test_reorder_against_store_append_order_is_still_detected(self):
+        """Dropping the contiguity rule must not drop ordering.
+
+        Events are read ORDER BY sequence, so swapping two rows' sequences reorders the
+        chain as the verifier sees it. chain_position then lands where the next position
+        was expected, which is the property the old contiguity rule was reaching for.
+        """
+        conn = self._raw()
+        rows = conn.execute(
+            "SELECT sequence, event_id FROM mission_events WHERE mission_id=?"
+            " ORDER BY sequence", (self.mission_id,)).fetchall()
+        first, second = rows[0], rows[1]
+        spare = conn.execute("SELECT MAX(sequence)+1000 m FROM mission_events").fetchone()["m"]
+        conn.execute("UPDATE mission_events SET sequence=? WHERE event_id=?",
+                     (spare, first["event_id"]))
+        conn.execute("UPDATE mission_events SET sequence=? WHERE event_id=?",
+                     (first["sequence"], second["event_id"]))
+        conn.execute("UPDATE mission_events SET sequence=? WHERE event_id=?",
+                     (second["sequence"], first["event_id"]))
+        conn.close()
+        result = self.store.verify_mission_chain(self.mission_id)
+        self.assertFalse(result["ok"])
+        self.assertIn("chain_position_gap", self._issue_kinds(result))
+
+    def test_tail_sequence_is_the_last_appended_row(self):
+        conn = self._raw()
+        expected = conn.execute(
+            "SELECT MAX(sequence) m FROM mission_events WHERE mission_id=?",
+            (self.mission_id,)).fetchone()["m"]
+        conn.close()
+        self.assertEqual(
+            self.store.verify_mission_chain(self.mission_id)["tail_sequence"], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

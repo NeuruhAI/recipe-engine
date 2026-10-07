@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from dataclasses import replace
+from typing import Any, Mapping
 
+from recipe_engine.founder_runtime.contracts.authority import AuthorityClass
 from recipe_engine.founder_runtime.errors import MissionSchemaInvalid
 from recipe_engine.founder_runtime.contracts.mission import (
     Mission, Principal, MissionClass, Priority, RiskClass, AutonomyLevel,
     SCHEMA_MISSION, validate_mission_dict,
 )
+from recipe_engine.founder_runtime.contracts.work_spec import WorkSpec
 from recipe_engine.founder_runtime.state.states import MissionState
 from recipe_engine.founder_runtime.ids import new_uuid, hash_payload, stable_id
 from recipe_engine.founder_runtime.adapters.fixture_iar import FixtureIAR
-from .deliverables import system_status_deliverables
+from .deliverables import execution_deliverables, system_status_deliverables
 from .constraints import (
     AuthorityEnvelope,
     DEFAULT_CONSTRAINTS,
@@ -38,6 +42,41 @@ _DOMAIN_BY_CLASS = {
 # Mission-level evidence every compiled mission owes, independent of its
 # deliverables.  A mission that cannot produce these cannot be completed.
 _BASE_REQUIRED_EVIDENCE = ("execution_receipts", "replay_projection", "authority_classification")
+
+# Extension keys a caller of the compiler may supply: the continuation a mission
+# declares for after its verified completion, and the lineage a continuation
+# child carries back to its completed parent. Both are composed by the runtime
+# service, never by a model, and both land in the hash-chained creation event.
+CALLER_EXTENSION_KEYS: tuple[str, ...] = ("continuation_plan", "lineage")
+
+
+def _bind_work_spec_consequence(requirements: list[Any], work_spec: WorkSpec | None) -> list[Any]:
+    if work_spec is None:
+        return requirements
+    required_class = None
+    reason_code = ""
+    if work_spec.irreversible or work_spec.private_ip_risk:
+        required_class = AuthorityClass.A6
+        reason_code = "WORK_SPEC_HIGH_RISK_CONSEQUENCE"
+    elif work_spec.production_mutation or work_spec.external_message or work_spec.money_move:
+        required_class = AuthorityClass.A5
+        reason_code = "WORK_SPEC_EXTERNAL_CONSEQUENCE"
+    if required_class is None:
+        return requirements
+    order = {authority_class: index for index, authority_class in enumerate(AuthorityClass)}
+    return [
+        replace(
+            requirement,
+            authority_class=required_class,
+            reason="explicit work specification carries a higher consequence",
+            requires_approval=True,
+            enhanced=required_class == AuthorityClass.A6,
+            reason_code=reason_code,
+        )
+        if order[requirement.authority_class] < order[required_class]
+        else requirement
+        for requirement in requirements
+    ]
 
 
 def _approval_gates(requirements: list[Any]) -> list[str]:
@@ -103,7 +142,16 @@ def compile_intent_to_mission(
     creation_idempotency_key: str = "",
     iar: FixtureIAR | None = None,
     envelope: AuthorityEnvelope = AuthorityEnvelope.READ_ONLY_FIXTURE,
+    work_spec: Mapping[str, Any] | None = None,
+    extra_extensions: Mapping[str, Any] | None = None,
 ) -> tuple[Mission, dict[str, Any]]:
+    # Only the lineage/continuation material the runtime itself composes may ride
+    # into a mission body; everything else in extensions is compiler-owned.
+    extras = dict(extra_extensions or {})
+    unknown_extensions = sorted(set(extras) - set(CALLER_EXTENSION_KEYS))
+    if unknown_extensions:
+        raise MissionSchemaInvalid("mission extensions are runtime-owned",
+                                   {"unknown": unknown_extensions})
     principal = principal or Principal.jeramie_fixture()
     if principal.principal_id != "jeramie":
         # P1 only supports fixture principal jeramie
@@ -149,7 +197,16 @@ def compile_intent_to_mission(
     risk = RiskClass(interpretation.get("risk_class", "medium")) if interpretation.get("risk_class") in {r.value for r in RiskClass} else RiskClass.MEDIUM
 
     extraction = extract_with_provenance(request_text, envelope=envelope)
-    authority_requirements = classify_authority(request_text, canonical_action=intent)
+    mission_id = new_uuid("msn")
+    canonical_work_spec = WorkSpec.create(mission_id, work_spec) if work_spec is not None else None
+    if canonical_work_spec is not None and deliverables:
+        # An executable mission delivers its executed, judged work spec -- not the
+        # system-status fixture report, which no execution evidence speaks to.
+        deliverables = execution_deliverables()
+    authority_requirements = _bind_work_spec_consequence(
+        classify_authority(request_text, canonical_action=intent),
+        canonical_work_spec,
+    )
     required_evidence = list(_BASE_REQUIRED_EVIDENCE)
     for d in deliverables:
         for ev in d.evidence_requirements:
@@ -163,10 +220,12 @@ def compile_intent_to_mission(
     extensions["iar_candidate_strategy_hints"] = list(interpretation.get("candidate_strategy_hints") or [])
     extensions["constraint_provenance"] = [dict(p) for p in extraction.provenance]
     extensions["authority_envelope"] = envelope.value
+    for key, value in (extras or {}).items():
+        extensions[key] = json.loads(json.dumps(value, sort_keys=True))
 
     mission = Mission(
         schema_version=SCHEMA_MISSION,
-        mission_id=new_uuid("msn"),
+        mission_id=mission_id,
         version=0,
         principal=principal,
         title=title,
@@ -194,6 +253,8 @@ def compile_intent_to_mission(
         required_evidence=required_evidence,
         approval_gates=_approval_gates(authority_requirements),
         extensions=extensions,
+        work_spec=canonical_work_spec,
+        work_spec_sha256=canonical_work_spec.sha256() if canonical_work_spec is not None else None,
     )
     mission.recompute_input_hash()
     errs = validate_mission_dict(mission.to_dict())

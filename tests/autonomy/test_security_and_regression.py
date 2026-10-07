@@ -46,8 +46,9 @@ class PipelineRegressionTests(unittest.TestCase):
     def test_protected_files_unchanged(self):
         # expected hashes from pre-implementation baseline (computed at worktree create).
         # run.py + cities.py re-pinned 2026-08-18 (E3 lane A: SSR carousel -> /api/sale-details).
+        # run.py re-pinned 2026-09-13 (T4 topology: db authority resolver + write-target preflight, PR #25).
         expected = {
-            "run.py": "fb5c22096e4c02820d00f941d9541fb0bc6709445a52982a250f33245ed4aedf",
+            "run.py": "4db0684a03a979047741eb7fc042b81b2dead12c6cd86be40ad33e9ea8341adc",
             "scripts/daily_run.sh": "d55e18e2144251e4ba9d14d460ca6ad5d6a4a812d34bb9ba2590cc4794b14357",
             "db/010_recipe_schema.sql": "92fe05549eceb58b2f6514653e5b700b318c45446ea3dcb64eff95409df4cfd3",
             "recipe_engine/engine.py": "e0e7f29ee2f6946044e5f4a0e962114cdab12a27942022ffaeb94b77dd2c15cd",

@@ -27,6 +27,8 @@ def verify_completion(
     clock_now: str = "",
     decision_packet_id: str | None = None,
     plan_id: str | None = None,
+    remaining_risks: Sequence[str] | None = None,
+    recommended_follow_on: Sequence[str] | None = None,
 ) -> CompletionReport:
     target = MissionState.COMPLETED
     if not is_transition_allowed(mission.current_state, target) and mission.current_state not in (
@@ -70,8 +72,14 @@ def verify_completion(
         evidence_refs=[r.receipt_id for r in receipts],
         code_changes=[], operational_changes=[],
         approvals_used=[getattr(a, "approval_id", str(a)) for a in approvals],
-        unresolved_items=[], remaining_risks=["fixture_evidence_cannot_authorize_live_mutation"],
-        recommended_follow_on=["p2_live_executor_signing_after_governance"],
+        unresolved_items=[],
+        # Callers completing on live evidence name their own residual risk and
+        # follow-on (e.g. a declared continuation); the fixture defaults stand
+        # for every existing caller.
+        remaining_risks=(list(remaining_risks) if remaining_risks is not None
+                         else ["fixture_evidence_cannot_authorize_live_mutation"]),
+        recommended_follow_on=(list(recommended_follow_on) if recommended_follow_on is not None
+                               else ["p2_live_executor_signing_after_governance"]),
         proposed_memory_updates=[], completed_at=clock_now,
         exceptions=[], decision_packet_id=decision_packet_id,
         plan_id=plan_id or mission.plan_id,

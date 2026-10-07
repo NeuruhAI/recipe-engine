@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""neuruh-approve: record a founder approval on the Founder Runtime (G-1).
+
+    neuruh-approve <mission_id> [--gate] --reason "..." [--port 19090] [--expected-version N]
+
+Without --gate it records a plan approval (POST /v1/missions/{id}/approve).
+With --gate it records the mission AUTHORITY gate ALLOW (POST .../gate/approve),
+the one FR signs into the artifact Governance verifies.
+
+The founder token is read from the login Keychain (service
+"neuruh-fr-founder-token", account "jeramie") at call time, on every call. The
+item trusts no application, so macOS asks you to Allow each read; click Allow,
+never "Always Allow". The token is never cached, printed, logged or written.
+
+It is NEVER accepted as an argument, a flag or an environment variable:
+arguments land in ~/.zsh_history, and environment variables reach child
+processes and process listings. This tool refuses all three, and if the token
+ever turns up in its own command line or environment it refuses and tells you
+to rotate it. Loopback only: the token is sent to 127.0.0.1 and nowhere else.
+Stdlib only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+import uuid
+
+KEYCHAIN_SERVICE = "neuruh-fr-founder-token"
+KEYCHAIN_ACCOUNT = "jeramie"
+SECURITY_BIN = "/usr/bin/security"
+HOST = "127.0.0.1"
+# Evidence-ref prefix FR uses for the signed Governance approval
+# (recipe_engine/founder_runtime/missions/long_horizon.py GOV_APPROVAL_REF_PREFIX).
+GOV_APPROVAL_REF_PREFIX = "gov.founder.approval.v1="
+DEFAULT_PORT = 19090
+
+# Environment variables a founder token must never arrive in.
+FORBIDDEN_ENV = ("FR_FOUNDER_TOKEN", "FR_FOUNDER_TOKEN_FILE", "NEURUH_FOUNDER_TOKEN",
+                 "NEURUH_APPROVE_TOKEN")
+# Flags that would carry a credential on the command line.
+_TOKEN_FLAG = re.compile(
+    r"^-{1,2}(t|k|token|founder[-_]?token|key|password|passwd|secret|bearer|auth|authorization|credential)$",
+    re.IGNORECASE)
+
+EXIT_OK = 0
+EXIT_HTTP = 1
+EXIT_REFUSED = 2
+EXIT_KEYCHAIN = 3
+
+
+class Refused(Exception):
+    def __init__(self, message: str, code: int = EXIT_REFUSED):
+        super().__init__(message)
+        self.code = code
+
+
+def read_keychain_token() -> str:
+    """One Keychain read (one macOS Allow prompt). The value stays in memory only."""
+    try:
+        proc = subprocess.run(
+            [SECURITY_BIN, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"],
+            capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Refused(f"Keychain read failed: {type(exc).__name__}", EXIT_KEYCHAIN) from None
+    token = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not token:
+        raise Refused("Keychain read denied or the founder token item is missing "
+                      f"(service {KEYCHAIN_SERVICE}, account {KEYCHAIN_ACCOUNT})", EXIT_KEYCHAIN)
+    return token
+
+
+def http_json(method: str, url: str, token: str, body: dict | None = None,
+              headers: dict | None = None, timeout: float = 120.0) -> tuple[int, object]:
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer " + token)
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            return resp.status, (json.loads(raw) if raw else {})
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8")
+        try:
+            return exc.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return exc.code, {"raw": raw[:300]}
+
+
+def _refuse_token_flags(argv: list[str]) -> None:
+    for arg in argv:
+        if not arg.startswith("-"):
+            continue
+        if _TOKEN_FLAG.match(arg.split("=", 1)[0]):
+            raise Refused(f"refused {arg.split('=', 1)[0]!r}: the founder token is read from the login "
+                          "Keychain only and is never accepted on the command line (it would land in "
+                          "~/.zsh_history)")
+
+
+def _refuse_token_env(environ) -> None:
+    present = [name for name in FORBIDDEN_ENV if str(environ.get(name, "")).strip()]
+    if present:
+        raise Refused(f"refused: {', '.join(present)} is set. The founder token is read from the login "
+                      "Keychain only and is never accepted from the environment; unset it")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="neuruh-approve", allow_abbrev=False,
+        description="Record a founder approval. The founder credential is read from the login Keychain "
+                    "at call time (macOS asks you to Allow); it is never an argument or env var.")
+    p.add_argument("mission_id")
+    p.add_argument("--gate", action="store_true",
+                   help="approve the mission AUTHORITY gate (signed for Governance) instead of the plan")
+    p.add_argument("--reason", required=True, help="why you approve (recorded with the decision)")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT, help="Founder Runtime loopback port")
+    p.add_argument("--expected-version", type=int, default=None,
+                   help="mission version to approve at (default: current version, fetched first)")
+    return p
+
+
+def _summary(status: int, payload: object, mission_id: str, route: str) -> dict:
+    out: dict = {"mission_id": mission_id, "route": route, "http_status": status}
+    if isinstance(payload, dict) and status == 200:
+        appr = payload.get("approval") or {}
+        env = payload.get("envelope") or {}
+        refs = appr.get("evidence_refs") or []
+        out.update({
+            "approval_id": appr.get("approval_id"),
+            "decided_by": appr.get("decided_by"),
+            "decision": appr.get("decision"),
+            "authority_state": payload.get("authority_state"),
+            "signed_governance_artifact": any(isinstance(r, str) and r.startswith(GOV_APPROVAL_REF_PREFIX)
+                                              for r in refs),
+            "state": env.get("state"),
+            "version": env.get("version"),
+            "idempotent_replay": bool(payload.get("idempotent_replay")),
+        })
+    elif isinstance(payload, dict):
+        err = payload.get("error") or payload.get("detail") or payload
+        if isinstance(err, dict):
+            out["error"] = {"code": err.get("code"), "message": err.get("message")}
+        else:
+            out["error"] = {"message": str(err)[:300]}
+    return out
+
+
+def main(argv: list[str] | None = None, environ=None, read_token=read_keychain_token,
+         http=http_json, out=None, err=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    environ = os.environ if environ is None else environ
+    out = out or sys.stdout
+    err = err or sys.stderr
+    try:
+        # Refuse every non-Keychain channel BEFORE the Keychain is touched.
+        _refuse_token_flags(argv)
+        _refuse_token_env(environ)
+        try:
+            args = build_parser().parse_args(argv)
+        except SystemExit as exc:
+            return EXIT_REFUSED if exc.code else EXIT_OK
+        token = read_token()
+        try:
+            if any(token in a for a in argv) or any(token in str(v) for v in environ.values()):
+                raise Refused("refused: the founder token appears in this command line or environment. "
+                              "It has leaked (shell history / process environment): rotate it before use")
+            base = f"http://{HOST}:{args.port}/v1/missions/{args.mission_id}"
+            version = args.expected_version
+            if version is None:
+                status, payload = http("GET", base, token)
+                if status != 200 or not isinstance(payload, dict):
+                    print(json.dumps(_summary(status, payload, args.mission_id, "GET mission")), file=out)
+                    return EXIT_HTTP
+                version = int(payload["envelope"]["version"])
+            route = base + ("/gate/approve" if args.gate else "/approve")
+            key = f"neuruh-approve:{args.mission_id}:{'gate' if args.gate else 'plan'}:{uuid.uuid4()}"
+            status, payload = http("POST", route, token, {"reason": args.reason},
+                                   {"Idempotency-Key": key, "X-Expected-Version": str(version)})
+        finally:
+            token = None  # never cached
+        summary = _summary(status, payload, args.mission_id,
+                           "POST gate/approve" if args.gate else "POST approve")
+        print(json.dumps(summary, indent=1), file=out)
+        return EXIT_OK if status == 200 else EXIT_HTTP
+    except Refused as exc:
+        print("neuruh-approve: " + str(exc), file=err)
+        return exc.code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

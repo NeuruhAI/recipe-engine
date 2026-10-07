@@ -1,0 +1,27 @@
+producer_receipt_field	source_in_recipe_engine	lead_recipe_os_intake_field	membership_observation_field	in_producer_content_sha256	in_intake_content_sha256	notes
+schema_version	constant neuruh.recipe-engine.eligibility-receipt.v1	schema_version = neuruh.lead-recipe-os.independent-eligibility-intake.v1	schema_version = neuruh.lead-recipe-os.membership-observation.v1	yes	yes	projection rewrites the constant; both hashes cover their own constant
+mode	context.mode (FIXTURE/SHADOW/LIVE/SYNTHETIC)	mode (const FIXTURE)	mode (const FIXTURE)	yes	yes	projection refuses any mode but FIXTURE rather than relabelling
+producer_owner	constant recipe-engine	producer_owner (const recipe-engine)	(absent)	yes	yes
+producer_identity	constant recipe_engine.opportunity_intelligence.eligibility	(absent; schema forbids extras)	(absent)	yes	no	producer identity survives only in the producer receipt
+producer_version	constant recipe-engine/eligibility@1.0.0	(absent)	(absent)	yes	no	bump on any semantic change to derive_decision or clause evaluation
+evaluation_kind	constant INDEPENDENT_ELIGIBILITY	evaluation_kind (const INDEPENDENT_ELIGIBILITY)	(absent)	yes	yes
+tenant_id	context.tenant_id (policy.tenant_id must equal it)	tenant_id	tenant_id	yes	yes	cross-tenant policy binding refused by producer and by consumer
+universe_id	context.universe_id	universe_id	universe_id	yes	yes
+opportunity_id	context.opportunity_id	opportunity_id	opportunity_id	yes	yes	candidate identity passes through unchanged; never minted or restaged
+asset_id	context.asset_id	asset_id	asset_id	yes	yes
+recipe_id	policy.recipe_id	recipe_id	recipe_id	yes	yes
+recipe_version_id	policy.recipe_version_id	recipe_version_id	recipe_version_id	yes	yes	new version = new receipt identity, same membership_key
+policy_digest	content_hash(policy body: schema_version, tenant_id, recipe_id, recipe_version_id, version, validity_seconds, clauses)	policy_digest (must equal RecipeVersion.policy_digest)	(absent)	yes	yes	consumer treats it as opaque and compares equality
+composition_digest	content_hash(policy.composition) exactly as consumer recomputes	composition_digest (must equal content_hash(RecipeVersion.composition))	(absent)	yes	yes	proven byte-equal against the Astra fixture composition digest
+membership_key	content_hash({tenant_id, universe_id, opportunity_id, recipe_id})	(absent; consumer derives it)	membership_key	yes	no	consumer derivation is identical (cross-repo court asserts equality)
+context_digest	content_hash(canonical context)	(absent)	(absent)	yes	no	replay identity of the evidence context (evidence/signal order canonicalised)
+evidence_digests	{evidence_id: content_sha256} for evidence that supported a known clause finding	evidence_digests	(absent)	yes	yes	consumer requires each entry BOUND with ledger_ref and observed_at <= evaluated_at; producer only admits such evidence
+evidence_lineage	every context evidence item with used flag and exclusion_reason (EVIDENCE_WITHDRAWN, EVIDENCE_STALE, EVIDENCE_UNBOUND, SIGNAL_UNKNOWN, ...)	(absent)	(absent)	yes	no	source withdrawal/staleness preserved as lineage, never as NO_MATCH
+clauses	per-clause outcome, observed_state, reason_codes, signal_ids, evidence_ids	(absent)	(absent)	yes	no	clause-level explanation required by the mission; validator re-derives decision from it
+decision	derive_decision(clauses)	decision	decision	yes	yes	MATCH / NO_MATCH / UNKNOWN preserved 1:1
+reason	derive_decision(clauses) deterministic text	reason	reason	yes	yes
+evaluated_at	context.as_of rendered as pydantic renders aware UTC	evaluated_at	evaluated_at	yes	yes	no wall clock; replay with the same as_of reproduces the hash
+valid_until	min(as_of + policy.validity_seconds, observed_at + clause.max_age_seconds over supporting evidence)	valid_until	valid_until	yes	yes	always > evaluated_at; consumer rejects empty windows
+supersedes	explicit caller input (prior receipt content_sha256 for the same membership_key)	(absent)	(absent)	yes	no	journal enforces same membership_key, existing target, no double supersession; history retained
+content_sha256	content_hash(all other producer fields)	content_sha256 = content_hash(18 intake fields)	receipt_sha256 (copied from intake content_sha256)	self	self	two different digests by design: producer receipt vs consumer projection
+(never emitted)	primary_recipe, rank, recipe_rank, global_rank, score, signal_tags, component_contributions, stage, lead_status, crm_id, contact_authorized, phone, outreach, priority_tier	(schema forbids)	production_write=false, contact_authorized=false (consumer constants)	n/a	n/a	NEVER_EMITTED_RECEIPT_KEYS refused by validate_eligibility_receipt; FORBIDDEN_AUTHORITY_KEYS refused on input

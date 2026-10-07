@@ -1,0 +1,11 @@
+dimension,owner,recipe_engine_state,deterministic_receipt_state,unknown_semantics_state,canonical_file,notes
+signal_strength,recipe_engine,IMPLEMENTED,IMPLEMENTED,PRESERVED,scripts/rank_nc_curative_raw.py,score_reasons carry explicit per-factor deltas
+strategic_fit,recipe_engine,IMPLEMENTED,IMPLEMENTED,PRESERVED,scripts/rank_nc_curative_raw.py,recipe_id assignment and trigger classes are explicit
+urgency,recipe_engine_plus_process_clock,PARTIAL,PARTIAL,PRESERVED,scripts/rank_nc_curative_raw.py,foreclosure and tax urgency are present but process-clock materialization is partial
+downside_risk,recipe_engine_plus_governance,PARTIAL,PARTIAL,PRESERVED,scripts/rank_nc_curative_raw.py,title conflict and disqualifier paths are represented but not fully source-covered
+evidence_confidence,landos_engine,CONTRACT_ONLY,CONTRACT_ONLY,PRESERVED,recipe_engine/opportunity_intelligence/contracts.py,owned by LandOS evaluator contract; not re-implemented in Recipe Engine
+source_independence_diversity,landos_ingest_plus_landos_engine,PARTIAL,IMPLEMENTED,PRESERVED,scripts/rank_nc_curative_raw_v3.py,independent_source_family_count added as deterministic annotation
+data_completeness,landos_ingest_plus_deedsonar,PARTIAL,IMPLEMENTED,PRESERVED,recipe_engine/opportunity_intelligence/oppack_receipts.py,unknown_inputs and coverage_state are explicitly emitted
+economic_value,landos_engine,PARTIAL,PARTIAL,PRESERVED,scripts/rank_nc_curative_raw.py,assessed-value and tax-balance proxies are explicit and marked as proxy not verified equity
+contactability,contact_intelligence_plus_governance,CONTRACT_ONLY,CONTRACT_ONLY,PRESERVED,recipe_engine/opportunity_intelligence/contracts.py,contact authorization remains false/unknown and is never inferred from phone presence
+liquidity,outcome_observer_plus_deedsonar,MISSING,MISSING,PRESERVED,RECIPE_INDEX.yaml,no canonical liquidity runtime in this repository

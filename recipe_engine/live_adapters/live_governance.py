@@ -199,6 +199,7 @@ class LiveGovernanceAdapter(LiveAdapterBase):
         *,
         founder_approval: Mapping[str, Any] | None,
         meta: AdapterRequestMeta,
+        grant: Mapping[str, Any] | None = None,
     ) -> AdapterResult:
         """Submit one exact action, with its external founder approval, to /v2/authorize.
 
@@ -223,6 +224,13 @@ class LiveGovernanceAdapter(LiveAdapterBase):
             body: dict[str, Any] = {"facts": facts_dict}
             if founder_approval is not None:
                 body["founder_approval"] = dict(founder_approval)
+            # A FounderGrant is bounded, reusable founder authority (gov.grant.v1)
+            # issued and signed OUTSIDE this process. Like the approval it is
+            # submitted verbatim: this adapter cannot mint, alter or widen one.
+            if grant is not None:
+                if "signature" not in grant:
+                    raise UnsafeCapability("an unsigned grant is not authority", {})
+                body["grant"] = dict(grant)
             timeout = self.op_timeout(_OP_AUTHORIZE, meta)
             resp = self._http.request(
                 _SERVICE, "/v2/authorize", timeout_ms=timeout, method="POST", json_body=body
@@ -243,6 +251,7 @@ class LiveGovernanceAdapter(LiveAdapterBase):
             **envelope,
             "request_hash": facts_hash,
             "founder_approval_presented": founder_approval is not None,
+            "grant_presented": grant is not None,
             "execution_marker": NOT_CLAIMED,
             "mutation_authority_consumed": False,
         }

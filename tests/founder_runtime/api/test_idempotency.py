@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import pytest
 
 from recipe_engine.founder_runtime.api.service import ApiError
@@ -26,8 +28,8 @@ def test_duplicate_approval_replays_receipt(service):
     res = service.create_mission(objective="status", idempotency_key="dup3")
     mid = res["envelope"]["mission_id"]
     ver = res["envelope"]["version"]
-    a1 = service.approve_plan(mid, reason="ok", idempotency_key="ap1", expected_version=ver)
-    a2 = service.approve_plan(mid, reason="ok", idempotency_key="ap1", expected_version=ver)
+    a1 = service.approve_plan(mid, reason="ok", idempotency_key="ap1", expected_version=ver, decider=FOUNDER)
+    a2 = service.approve_plan(mid, reason="ok", idempotency_key="ap1", expected_version=ver, decider=FOUNDER)
     assert a2.get("idempotent_replay") is True
     assert a1["approval"]["approval_id"] == a2["approval"]["approval_id"]
 
@@ -36,9 +38,9 @@ def test_conflicting_approval_replay_fails(service):
     res = service.create_mission(objective="status", idempotency_key="dup4")
     mid = res["envelope"]["mission_id"]
     ver = res["envelope"]["version"]
-    service.approve_plan(mid, reason="ok", idempotency_key="ap2", expected_version=ver)
+    service.approve_plan(mid, reason="ok", idempotency_key="ap2", expected_version=ver, decider=FOUNDER)
     with pytest.raises(ApiError) as ei:
-        service.approve_plan(mid, reason="changed", idempotency_key="ap2", expected_version=ver)
+        service.approve_plan(mid, reason="changed", idempotency_key="ap2", expected_version=ver, decider=FOUNDER)
     assert ei.value.code == "IDEMPOTENCY_CONFLICT"
 
 
@@ -47,7 +49,7 @@ def test_reject_requires_reason(service):
     mid = res["envelope"]["mission_id"]
     with pytest.raises(ApiError) as ei:
         service.reject_plan(mid, reason="", idempotency_key="rj1",
-                            expected_version=res["envelope"]["version"])
+                            expected_version=res["envelope"]["version"], decider=FOUNDER)
     assert ei.value.status == 422
 
 
@@ -55,6 +57,6 @@ def test_reject_records_authority_state(service):
     res = service.create_mission(objective="status", idempotency_key="dup6")
     mid = res["envelope"]["mission_id"]
     out = service.reject_plan(mid, reason="too risky", idempotency_key="rj2",
-                              expected_version=res["envelope"]["version"])
+                              expected_version=res["envelope"]["version"], decider=FOUNDER)
     assert out["authority_state"] == "deny"
     assert out["executed"] is False

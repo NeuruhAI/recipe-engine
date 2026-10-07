@@ -1,0 +1,46 @@
+{
+  "schema_version": "neuruh.recipe-engine.scoring-strategy.v1",
+  "strategy_id": "nc_curative_rank.v3",
+  "description": "The courted NC curative priority: the additive point model of scripts/rank_nc_curative_raw.py::base_score, capped at 100, tiered A-E, ordered by the ranker's own tie-break. Recipe-unconditioned: every recipe a property satisfies carries the same score under this strategy.",
+  "score_name": "curative_priority_score",
+  "score_semantics": "DETERMINISTIC_ADDITIVE_CURATIVE_PRIORITY",
+  "recipe_version": "nc_curative_recipes.v1",
+  "cap": 100,
+  "factor_deltas": {
+    "published_tax_distress": 10,
+    "active_tax_foreclosure": 25,
+    "heir_or_estate_signal": 20,
+    "ownership_fragmentation_proxy": 8,
+    "out_of_state_owner": 5,
+    "ownership_20_plus_years": 8,
+    "ownership_10_plus_years": 4,
+    "assessed_value_250k_plus_proxy": 10,
+    "assessed_value_150k_plus_proxy": 8,
+    "assessed_value_75k_plus_proxy": 5,
+    "tax_balance_10k_plus": 8,
+    "tax_balance_5k_plus": 5,
+    "tax_balance_1k_plus": 2,
+    "multi_trigger_3_plus": 10
+  },
+  "recipe_factor_deltas": {},
+  "tiers": [
+    {"tier": "A", "min": 85},
+    {"tier": "B", "min": 70},
+    {"tier": "C", "min": 55},
+    {"tier": "D", "min": 35},
+    {"tier": "E", "min": null}
+  ],
+  "tie_break": [
+    "composite_desc",
+    "trigger_count_desc",
+    "assessed_value_less_tax_desc_unknown_last",
+    "assessed_value_desc_unknown_last",
+    "tax_balance_desc_unknown_last",
+    "county_fips_asc",
+    "parcel_apn_asc"
+  ],
+  "provenance": {
+    "canonical_source": "scripts/rank_nc_curative_raw.py::base_score, ::tier, ::rank_rows",
+    "parity_court": "tests/opportunity_intelligence/test_membership_scoring.py"
+  }
+}

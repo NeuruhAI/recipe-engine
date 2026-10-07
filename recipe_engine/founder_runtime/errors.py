@@ -54,6 +54,12 @@ class ErrorCode(str, Enum):
     QDRANT_COUNT_CHANGED = "QDRANT_COUNT_CHANGED"
     QDRANT_COLLECTION_MISMATCH = "QDRANT_COLLECTION_MISMATCH"
     QDRANT_PAYLOAD_PROVENANCE_MISMATCH = "QDRANT_PAYLOAD_PROVENANCE_MISMATCH"
+    # R02D execution-outcome write-back
+    EXECUTION_OUTCOME_MALFORMED = "EXECUTION_OUTCOME_MALFORMED"
+    EXECUTION_OUTCOME_REJECTED = "EXECUTION_OUTCOME_REJECTED"
+    # Governed completion of an executed mission (fr.reconcile_request.v1)
+    RECONCILE_MALFORMED = "RECONCILE_MALFORMED"
+    RECONCILE_REJECTED = "RECONCILE_REJECTED"
 
 
 class FounderRuntimeError(Exception):
@@ -242,3 +248,45 @@ class QdrantCollectionMismatch(FounderRuntimeError):
 class QdrantPayloadProvenanceMismatch(FounderRuntimeError):
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(ErrorCode.QDRANT_PAYLOAD_PROVENANCE_MISMATCH, message, details)
+
+
+class ExecutionOutcomeMalformed(FounderRuntimeError):
+    """The write-back envelope is outside the exact fr.execution_outcome.v1 shape (HTTP 400)."""
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.EXECUTION_OUTCOME_MALFORMED, message, details)
+
+
+class ExecutionOutcomeRejected(FounderRuntimeError):
+    """A well-formed envelope that does not bind to this mission's evidence (HTTP 409).
+
+    ``details["reason_code"]`` names the precise refusal (e.g. OUTCOME_STALE,
+    RECEIPT_HASH_MISMATCH); callers surface it verbatim so an adversarial test
+    can assert exactly why the runtime refused.
+    """
+
+    def __init__(self, reason_code: str, message: str, details: dict[str, Any] | None = None):
+        merged = {"reason_code": reason_code, **(details or {})}
+        super().__init__(ErrorCode.EXECUTION_OUTCOME_REJECTED, message, merged)
+        self.reason_code = reason_code
+
+
+class ReconcileMalformed(FounderRuntimeError):
+    """The reconcile request is outside the exact fr.reconcile_request.v1 shape (HTTP 400)."""
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(ErrorCode.RECONCILE_MALFORMED, message, details)
+
+
+class ReconcileRejected(FounderRuntimeError):
+    """Well-formed reconcile evidence that does not complete this mission (HTTP 409).
+
+    ``reason_code`` names the precise refusal (COURT_RECORD_MISMATCH,
+    NOT_RECONCILING, CUSTODY_EVIDENCE_REQUIRED, ...). Nothing is appended on a
+    refusal: the mission stays exactly where the evidence left it.
+    """
+
+    def __init__(self, reason_code: str, message: str, details: dict[str, Any] | None = None):
+        merged = {"reason_code": reason_code, **(details or {})}
+        super().__init__(ErrorCode.RECONCILE_REJECTED, message, merged)
+        self.reason_code = reason_code

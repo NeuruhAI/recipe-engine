@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from recipe_engine.founder_runtime import RUNTIME_VERSION
 from recipe_engine.founder_runtime.clock import Clock, SystemClock
 from recipe_engine.founder_runtime.errors import (
     MissionNotFound, StateTransitionInvalid, AdapterModeInvalid,
     MissionSchemaInvalid, ApprovalRequired, AuthorityDenied, ApprovalExpired,
-    PersistenceConflict,
+    PersistenceConflict, ReconcileRejected,
 )
 from recipe_engine.founder_runtime.ids import new_uuid, hash_payload
 from recipe_engine.founder_runtime.serialization import to_canonical
@@ -34,6 +35,18 @@ from recipe_engine.founder_runtime.runtime.recovery import recover_mission
 from recipe_engine.founder_runtime.runtime.approvals import (
     is_approval_gated, validate_approval_record, assert_approval_usable, gated_action_for,
 )
+from recipe_engine.founder_runtime.runtime.approval_resolver import bound_work_spec_sha256
+from recipe_engine.founder_runtime.evidence.execution_outcome import (
+    EXECUTION_PROJECTION_KEY, bind_to_mission, parse_authority_reference, validate_execution_outcome,
+)
+from recipe_engine.founder_runtime.evidence.reconciliation import (
+    build_acceptance, build_execution_receipt, build_outcome_record, continuation_creation_key,
+    execution_facts, require_consequence_free, require_execution_deliverables,
+    validate_reconcile_request, verify_continuation_plan, verify_court_record, verify_lineage,
+    workers_content_sha,
+)
+from recipe_engine.founder_runtime.intent.deliverables import EXECUTION_DELIVERABLE_ID
+from recipe_engine.founder_runtime.runtime.completion import verify_completion
 from recipe_engine.founder_runtime.observability.logging import RuntimeLog
 from recipe_engine.founder_runtime.observability.metrics import Metrics
 
@@ -98,6 +111,8 @@ class MissionRuntime:
         *,
         creation_idempotency_key: str = "",
         envelope: AuthorityEnvelope = AuthorityEnvelope.READ_ONLY_FIXTURE,
+        work_spec: Mapping[str, Any] | None = None,
+        extra_extensions: Mapping[str, Any] | None = None,
     ) -> Mission:
         now = self.clock.now_iso()
         mission, interpretation = compile_intent_to_mission(
@@ -105,6 +120,8 @@ class MissionRuntime:
             clock_now=now,
             creation_idempotency_key=creation_idempotency_key,
             envelope=envelope,
+            work_spec=work_spec,
+            extra_extensions=extra_extensions,
         )
         creation_event = self._event(
             mission, prior=None, next_state=mission.current_state,
@@ -470,6 +487,19 @@ class MissionRuntime:
             scope=scope,
             now_iso=now,
         )
+        if (
+            mission.work_spec_sha256 is not None
+            and bound_work_spec_sha256(approval) != mission.work_spec_sha256
+        ):
+            raise AuthorityDenied(
+                "approval work specification mismatch",
+                {
+                    "approval_id": approval_id,
+                    "mission_id": mission_id,
+                    "expected_work_spec_sha256": mission.work_spec_sha256,
+                    "approved_work_spec_sha256": bound_work_spec_sha256(approval),
+                },
+            )
         # Compute the consumed record, then authorize it on-log before materializing.
         approval.decision = ApprovalDecision.CONSUMED
         approval.consumed_by = f"transition:{transition_reason}"
@@ -489,6 +519,7 @@ class MissionRuntime:
                 "action": action,
                 "scope": scope,
                 "consumed_by": approval.consumed_by,
+                "work_spec_sha256": mission.work_spec_sha256,
             },
             evidence_refs=[f"approval:{approval_id}"],
         )
@@ -702,6 +733,299 @@ class MissionRuntime:
         )
         return outcome
 
+    # ---- R02D: execution-outcome write-back (G-03) ---------------------------
+    # The Founder Runtime never learned that a dispatched execution finished:
+    # Mission B sat QUEUED (v15) after a SUCCEEDED, sealed receipt, and the SOPS
+    # cursor was the only thing preventing a second dispatch. The runtime now
+    # LEARNS the outcome from evidence: the sealed dispatch receipt (hash
+    # recomputed the emitter's way) or an independent court record, bound to
+    # this mission, its work specification, its consumed dispatch approval, the
+    # dispatched version and one execution id. It moves state only along the
+    # execution path and never to COMPLETED: execution completing is not
+    # verification, and a court passing is not completion.
+
+    def consumed_dispatch_approval(self, mission: Mission) -> Approval | None:
+        """The consumed approval that authorised dispatching this exact work spec, or None."""
+        action, scope = gated_action_for(MissionState.AWAITING_APPROVAL, MissionState.QUEUED)
+        for approval in reversed(self.store.list_approvals(mission.mission_id)):
+            if approval.decision != ApprovalDecision.CONSUMED:
+                continue
+            if not approval.approval_hash or approval.expected_hash() != approval.approval_hash:
+                continue
+            if approval.exact_requested_action != action or approval.scope != scope:
+                continue
+            if mission.work_spec_sha256 is not None and bound_work_spec_sha256(approval) != mission.work_spec_sha256:
+                continue
+            return approval
+        return None
+
+    def execution_projection(self, mission_id: str) -> dict[str, Any] | None:
+        mission = self.get_mission(mission_id)
+        found = (mission.extensions or {}).get(EXECUTION_PROJECTION_KEY)
+        return dict(found) if isinstance(found, dict) else None
+
+    def execution_outcomes(self, mission_id: str) -> list[dict[str, Any]]:
+        """Every accepted execution-outcome event, in chain order, with its evidence."""
+        out: list[dict[str, Any]] = []
+        for event in self.store.list_events(mission_id):
+            if event.event_type != EventType.EXECUTION_OUTCOME_RECORDED:
+                continue
+            envelope = dict((event.payload or {}).get("execution_outcome") or {})
+            out.append({
+                "event_id": event.event_id,
+                "sequence": event.sequence,
+                "chain_position": event.chain_position,
+                "prior_state": None if event.prior_state is None else event.prior_state.value,
+                "next_state": event.next_state.value,
+                "outcome": envelope.get("outcome"),
+                "implied": bool(envelope.get("implied", False)),
+                "execution_outcome": envelope,
+                "evidence_refs": list(event.evidence_refs),
+                "timestamp": event.timestamp,
+            })
+        return out
+
+    def record_execution_outcome(self, mission_id: str, body: Mapping[str, Any], *,
+                                 actor: str = "dispatch_bridge") -> dict[str, Any]:
+        """Learn one execution outcome from evidence. Raises
+        ExecutionOutcomeMalformed / ExecutionOutcomeRejected / MissionNotFound."""
+        outcome = validate_execution_outcome(body)
+        mission = self.get_mission(mission_id)
+        approval = self.consumed_dispatch_approval(mission)
+        decision = bind_to_mission(
+            outcome,
+            mission_id=mission_id,
+            mission_state=mission.current_state,
+            mission_version=mission.version,
+            work_spec_sha256=mission.work_spec_sha256,
+            dispatch_approval_id=None if approval is None else approval.approval_id,
+            projection=(mission.extensions or {}).get(EXECUTION_PROJECTION_KEY),
+        )
+        state_before = mission.current_state.value
+        if decision.replay:
+            self.metrics.inc("execution_outcome_replays")
+            return {
+                "applied": False,
+                "idempotent_replay": True,
+                "events_appended": [],
+                "state_before": state_before,
+                "state_after": state_before,
+                "execution": self.execution_projection(mission_id),
+            }
+        appended: list[str] = []
+        causation: str | None = None
+        for step in decision.steps:
+            mission = self.get_mission(mission_id)
+            ev = self._event(
+                mission,
+                prior=mission.current_state,
+                next_state=step.next_state,
+                etype=EventType.EXECUTION_OUTCOME_RECORDED,
+                reason=step.reason,
+                actor=actor,
+                idem=step.idempotency_key,
+                payload={"execution_outcome": dict(step.envelope)},
+                evidence_refs=list(step.evidence_refs),
+            )
+            ev.causation_id = causation
+            StateMachine.assert_transition(mission.current_state, step.next_state, event=ev, require_event=True)
+            self.store.append_event(ev, expected_version=mission.version, mission_body=mission)
+            appended.append(ev.event_id)
+            causation = ev.event_id
+        updated = self.get_mission(mission_id)
+        self.metrics.inc("execution_outcomes_recorded")
+        self.log.emit(
+            event_type="execution_outcome_recorded",
+            mission_id=mission_id,
+            state=updated.current_state.value,
+            result="ok",
+            extra={"outcome": outcome["outcome"], "execution_id": outcome["execution_id"],
+                   "prior": state_before, "next": updated.current_state.value},
+        )
+        return {
+            "applied": True,
+            "idempotent_replay": False,
+            "events_appended": appended,
+            "state_before": state_before,
+            "state_after": updated.current_state.value,
+            "execution": self.execution_projection(mission_id),
+        }
+
+    # ---- governed completion of an executed mission --------------------------
+    # RECONCILING was a dead end: a court outcome parks the mission there by
+    # design, and COMPLETED is reachable only through complete_mission, which
+    # needs a validated fr.receipt.v1, a verified outcome record and a canonical
+    # completion report that no route produced. reconcile_execution produces
+    # them — from the mission's own accepted chain plus the full sealed Sentinel
+    # record, re-verified against the digest the runtime accepted — and then asks
+    # the canonical completion verifier. It adds no authority: the dispatch was
+    # authorised at the gate, the court judged, and this binds the two.
+
+    def governance_authorization_id(self, mission_id: str) -> str | None:
+        """The Governance authorization that queued this mission, from its own chain."""
+        found = None
+        for event in self.store.list_events(mission_id):
+            if event.event_type != EventType.GOVERNANCE_RECORDED:
+                continue
+            resolved = (event.payload or {}).get("approval_resolver")
+            if isinstance(resolved, dict) and resolved.get("outcome") == "resolved_queued":
+                found = resolved.get("authorization_id") or found
+        return str(found) if found else None
+
+    def outcome_record(self, outcome_id: str, mission_id: str) -> dict[str, Any] | None:
+        row = self.store._c().execute(
+            "SELECT body_json FROM outcomes WHERE outcome_id=? AND mission_id=?",
+            (outcome_id, mission_id),
+        ).fetchone()
+        return json.loads(row["body_json"]) if row else None
+
+    def continuation_key(self, mission: Mission) -> str | None:
+        plan = (mission.extensions or {}).get("continuation_plan")
+        if plan is None:
+            return None
+        plan = verify_continuation_plan(plan)
+        return continuation_creation_key(mission.mission_id, plan["plan_sha256"])
+
+    def _repair_evidence_projections(self, mission_id: str) -> list[str]:
+        """Restore evidence rows the chain already logged but a crash never wrote.
+
+        record_receipt / record_outcome / complete_mission each commit their event
+        and then, separately, their side-table row. A process that dies between
+        the two leaves the chain ahead of the projection, and a retry cannot heal
+        it by re-recording: the rebuilt event carries a new id and timestamp, and
+        the store rightly refuses a reused idempotency key over a different body.
+        The chain is the truth, so the missing rows are rebuilt from the logged
+        events verbatim (save_receipt/save_completion re-check the logged object).
+        """
+        repaired: list[str] = []
+        for event in self.store.list_events(mission_id):
+            payload = event.payload or {}
+            if event.event_type == EventType.RECEIPT_RECORDED and isinstance(payload.get("receipt"), dict):
+                receipt = ExecutionReceipt.from_dict(payload["receipt"])
+                if self.store.get_receipt(receipt.receipt_id) is None:
+                    self.store.save_receipt(receipt)
+                    repaired.append(f"receipt:{receipt.receipt_id}")
+            elif event.event_type == EventType.OUTCOME_RECORDED and isinstance(payload.get("outcome"), dict):
+                outcome = payload["outcome"]
+                if outcome.get("outcome_id") and self.outcome_record(outcome["outcome_id"], mission_id) is None:
+                    self.store._c().execute(
+                        "INSERT OR IGNORE INTO outcomes(outcome_id, mission_id, body_json, created_at) VALUES (?,?,?,?)",
+                        (outcome["outcome_id"], mission_id, to_canonical(outcome), event.timestamp),
+                    )
+                    repaired.append(f"outcome:{outcome['outcome_id']}")
+            elif event.event_type == EventType.COMPLETION_RECORDED and isinstance(payload.get("completion_report"), dict):
+                if self.store.get_completion(mission_id) is None:
+                    self.store.save_completion(CompletionReport.from_dict(payload["completion_report"]))
+                    repaired.append(f"completion:{mission_id}")
+        if repaired:
+            self.metrics.inc("evidence_projections_repaired")
+            self.log.emit(event_type="evidence_projection_repaired", mission_id=mission_id,
+                          state=self.get_mission(mission_id).current_state.value, result="ok",
+                          extra={"repaired": repaired})
+        return repaired
+
+    def reconcile_execution(self, mission_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        """RECONCILING -> COMPLETED on verified execution evidence. Raises
+        ReconcileMalformed / ReconcileRejected / MissionNotFound; appends nothing
+        on a refusal."""
+        request = validate_reconcile_request(body)
+        if request["mission_id"] != mission_id:
+            raise ReconcileRejected("MISSION_MISMATCH", "request names a different mission",
+                                    {"route_mission_id": mission_id, "request_mission_id": request["mission_id"]})
+        self.get_mission(mission_id)
+        self._repair_evidence_projections(mission_id)
+        mission = self.get_mission(mission_id)
+        offered_record_sha = workers_content_sha(request["court_record"])
+
+        if mission.current_state == MissionState.COMPLETED:
+            completion = self.store.get_completion(mission_id)
+            outcome = (self.outcome_record(completion.outcome_ref, mission_id)
+                       if completion is not None and completion.outcome_ref else None)
+            if (
+                outcome is None
+                or outcome.get("execution_id") != request["execution_id"]
+                or outcome.get("court_record_sha") != offered_record_sha
+            ):
+                raise ReconcileRejected("RECONCILE_CONFLICT",
+                                        "mission is already complete on different evidence", {})
+            self.metrics.inc("reconcile_replays")
+            return {"applied": False, "idempotent_replay": True, "events_appended": [],
+                    "state_before": mission.current_state.value, "state_after": mission.current_state.value,
+                    "completion": completion.to_dict(), "outcome": outcome,
+                    "receipt": None, "continuation_key": self.continuation_key(mission)}
+        if mission.current_state != MissionState.RECONCILING:
+            raise ReconcileRejected("NOT_RECONCILING", "only a RECONCILING mission completes",
+                                    {"state": mission.current_state.value})
+
+        # Every check before anything is written.
+        facts = execution_facts(mission, self.execution_projection(mission_id),
+                                self.execution_outcomes(mission_id))
+        if request["execution_id"] != facts["execution_id"]:
+            raise ReconcileRejected("EXECUTION_ID_MISMATCH", "request names a different execution",
+                                    {"expected": facts["execution_id"], "actual": request["execution_id"]})
+        require_consequence_free(mission)
+        if facts["code_custody_required"] != bool(mission.work_spec.code_custody_required):
+            raise ReconcileRejected("RECEIPT_BINDING_MISMATCH",
+                                    "sealed receipt and work spec disagree on code custody",
+                                    {"field": "CODE_CUSTODY_REQUIRED"})
+        if facts["code_custody_required"]:
+            # A code change completes only when its custody and promotion are
+            # evidenced; that is a founder-gated merge, not execution evidence.
+            raise ReconcileRejected("CUSTODY_PROMOTION_EVIDENCE_REQUIRED",
+                                    "code-custody work completes only on custody and promotion evidence", {})
+        require_execution_deliverables(mission)
+        approval = self.consumed_dispatch_approval(mission)
+        approval_id, _ = parse_authority_reference(facts["authority_reference"])
+        if approval is None or approval.approval_id != approval_id:
+            raise ReconcileRejected("AUTHORITY_MISMATCH",
+                                    "execution authority is not this mission's consumed dispatch approval", {})
+        court = verify_court_record(request["court_record"], mission=mission, facts=facts)
+        receipt = build_execution_receipt(
+            mission, facts=facts, court=court,
+            governance_authorization_id=self.governance_authorization_id(mission_id))
+        lineage = (mission.extensions or {}).get("lineage")
+        if lineage is not None:
+            lineage = verify_lineage(lineage)
+        continuation_key = self.continuation_key(mission)
+
+        before = self.store.list_events(mission_id)
+        self.record_receipt(receipt)
+        self.set_deliverable_status(
+            mission_id, EXECUTION_DELIVERABLE_ID, DeliverableStatus.DELIVERED,
+            idempotency_key=f"deliv:{mission_id}:{EXECUTION_DELIVERABLE_ID}:reconcile:{receipt.receipt_id}",
+            actor="completion_reconciler")
+        mission = self.get_mission(mission_id)
+        receipts = self.store.list_receipts(mission_id)
+        outcome = build_outcome_record(mission, receipts=receipts, execution_receipt=receipt, lineage=lineage)
+        stored = self.outcome_record(outcome["outcome_id"], mission_id)
+        if stored is None:
+            self.record_outcome(mission_id, outcome)
+        elif stored != outcome:
+            raise ReconcileRejected("OUTCOME_CONFLICT", "an outcome with this identity already differs", {})
+        report = verify_completion(
+            self.get_mission(mission_id),
+            receipts=receipts,
+            artifacts=self.store.list_artifacts(mission_id),
+            approvals=[approval],
+            acceptance=build_acceptance(receipt),
+            outcome=outcome,
+            clock_now=self.clock.now_iso(),
+            plan_id=mission.plan_id,
+            remaining_risks=[],
+            recommended_follow_on=[continuation_key] if continuation_key else [],
+        )
+        mission = self.complete_mission(report)
+        appended = [e.event_id for e in self.store.list_events(mission_id)[len(before):]]
+        self.metrics.inc("missions_reconciled")
+        self.log.emit(event_type="mission_reconciled", mission_id=mission_id,
+                      state=mission.current_state.value, result="ok",
+                      extra={"execution_id": facts["execution_id"], "court_id": court["court_id"],
+                             "outcome_id": outcome["outcome_id"]})
+        return {"applied": True, "idempotent_replay": False, "events_appended": appended,
+                "state_before": MissionState.RECONCILING.value, "state_after": mission.current_state.value,
+                "completion": report.to_dict(), "outcome": outcome, "receipt": receipt.to_dict(),
+                "continuation_key": continuation_key}
+
     AUTHORIZATION_REQUEST_KEY = "authorization_request"
 
     def record_authorization_request(self, mission_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -720,12 +1044,18 @@ class MissionRuntime:
         the founder to have signed the wrong one of.
         """
         published = self.published_authorization_request(mission_id)
-        if published is not None and published.get("scope_key") == request.get("scope_key"):
+        if (
+            published is not None
+            and published.get("scope_key") == request.get("scope_key")
+            and published.get("source_sha") == request.get("source_sha")
+        ):
             return published
+        # The dedupe key names the source SHA too: the same scope re-published
+        # for a new runtime build is a new request, not a replay of the old one.
         self._record_same_state_event(
             mission_id, EventType.GOVERNANCE_RECORDED, "authorization_request_published",
             {self.AUTHORIZATION_REQUEST_KEY: dict(request)},
-            f"authz-request:{request['scope_key']}",
+            f"authz-request:{request['scope_key']}:{request.get('source_sha') or ''}",
             evidence_refs=[str(request["scope_key"])],
         )
         return dict(request)
@@ -758,6 +1088,7 @@ class MissionRuntime:
             "artifacts": self.store.list_artifacts(mission_id),
             "completion": None if not self.store.get_completion(mission_id) else self.store.get_completion(mission_id).to_dict(),
             "side_effects": self.store.list_side_effects(mission_id),
+            "execution_outcomes": self.execution_outcomes(mission_id),
         }
 
     def events(self, mission_id: str) -> list[dict[str, Any]]:

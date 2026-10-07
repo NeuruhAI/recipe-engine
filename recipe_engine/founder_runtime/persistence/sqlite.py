@@ -136,8 +136,18 @@ class SqliteStore:
                     (mission.creation_idempotency_key,),
                 ).fetchone()
                 if existing:
+                    existing_mission = Mission.from_dict(json.loads(existing["body_json"]))
+                    # Recompute using current request-only identity semantics so
+                    # missions written before candidate_id was excluded remain
+                    # retryable after an upgrade.
+                    if existing_mission.request_input_hash() != mission.input_hash:
+                        c.execute("ROLLBACK")
+                        raise PersistenceConflict(
+                            "mission creation idempotency key reused for different mission material",
+                            {"idempotency_key": mission.creation_idempotency_key},
+                        )
                     c.execute("COMMIT")
-                    return Mission.from_dict(json.loads(existing["body_json"]))
+                    return existing_mission
             if (
                 creation_event.event_type != EventType.MISSION_CREATED
                 or creation_event.schema_version != SCHEMA_EVENT
@@ -207,6 +217,15 @@ class SqliteStore:
 
     def get_mission(self, mission_id: str) -> Mission | None:
         row = self._c().execute("SELECT body_json FROM missions WHERE mission_id=?", (mission_id,)).fetchone()
+        if not row:
+            return None
+        return Mission.from_dict(json.loads(row["body_json"]))
+
+    def get_mission_by_creation_key(self, creation_idempotency_key: str) -> Mission | None:
+        row = self._c().execute(
+            "SELECT body_json FROM missions WHERE creation_idempotency_key=?",
+            (creation_idempotency_key,),
+        ).fetchone()
         if not row:
             return None
         return Mission.from_dict(json.loads(row["body_json"]))
@@ -1138,8 +1157,9 @@ class SqliteStore:
 
         Recomputes every event hash from canonical stored material and checks
         stored-vs-column hash agreement, genesis link, previous-hash linkage,
-        strict sequence/chain-position contiguity (no gaps, no duplicates, no
-        reorder), mission identity, and event-version consistency. Returns a
+        strict chain-position contiguity (no gaps, no duplicates, no reorder),
+        strictly increasing store sequence, mission identity, and event-version
+        consistency. Returns a
         dict with ok/issues; never mutates the store.
         """
         from recipe_engine.founder_runtime.contracts.events import GENESIS_EVENT_HASH
@@ -1162,7 +1182,6 @@ class SqliteStore:
             return {"ok": False, "issues": [f"event_chain_empty:{mission_id}"],
                     "mission_id": mission_id, "event_count": 0, "tail_sequence": None}
         prev_hash = GENESIS_EVENT_HASH
-        prev_sequence: int | None = None
         seen_positions: set[int] = set()
         for expected_position, r in enumerate(rows):
             body = json.loads(r["body_json"])
@@ -1192,10 +1211,17 @@ class SqliteStore:
             if ev.chain_position in seen_positions:
                 issues.append(f"duplicate_chain_position:{ev.event_id}")
             seen_positions.add(int(ev.chain_position))
-            # strict sequence contiguity
-            if prev_sequence is not None and int(r["sequence"]) != prev_sequence + 1:
-                issues.append(f"sequence_gap:{ev.event_id}")
-            prev_sequence = int(r["sequence"])
+            # No separate sequence rule. `sequence` is the table-wide autoincrement
+            # shared by every mission, so a mission whose events interleave with another
+            # live mission's owns a gapped range through no fault of its own; demanding
+            # contiguity here reported an intact chain as corrupt and made the API
+            # refuse to serve missions at all. Nor is there a weaker rule left to apply:
+            # these rows are fetched ORDER BY sequence ASC and `sequence` is the primary
+            # key, so "strictly increasing" holds by construction. The property that
+            # actually matters -- that this mission's chain order agrees with the store's
+            # append order -- is exactly what the chain_position check above enforces,
+            # because a reordered or spliced row changes the fetch order and lands a
+            # chain_position where the next one was expected.
             prev_hash = ev.event_hash
         # tail event count must match the mission's recorded version (truncated tail)
         if int(mrow["version"]) != len(rows):
@@ -1205,7 +1231,7 @@ class SqliteStore:
             "issues": issues,
             "mission_id": mission_id,
             "event_count": len(rows),
-            "tail_sequence": prev_sequence,
+            "tail_sequence": int(rows[-1]["sequence"]),
         }
 
     def rebuild_projection_from_events(self, mission_id: str) -> Mission:

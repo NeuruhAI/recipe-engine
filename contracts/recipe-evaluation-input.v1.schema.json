@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.recipe-engine.recipe-evaluation-input.v1",
+  "title": "RecipeEvaluationInput",
+  "description": "One candidate's evidence for the recipe compiler. Boolean genome ingredients arrive as eligibility-context.v1 signals whose signal_type is the ingredient id (e.g. tax.delinquent); numeric, date and category ingredients (equity.estimated_pct, tax_sale.sale_date, clock.*) arrive as measurements bound to the same evidence. A value in the wrong channel is refused. Ranking, projection and label fields (primary_recipe, rank, score, signal_tags, ...) are refused anywhere.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "context", "measurements"],
+  "properties": {
+    "schema_version": {"const": "neuruh.recipe-engine.recipe-evaluation-input.v1"},
+    "context": {"$ref": "eligibility.context.v1.schema.json"},
+    "measurements": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/measurement"}
+    }
+  },
+  "$defs": {
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measurement_id", "ingredient", "value", "basis", "confidence", "evidence_refs", "observed_at"],
+      "properties": {
+        "measurement_id": {"type": "string", "minLength": 1},
+        "ingredient": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A NUMBER / DATE / CATEGORY ingredient of the compiled set (canonical_recipes.INGREDIENTS)."
+        },
+        "value": {
+          "type": ["number", "string"],
+          "description": "NUMBER: finite number. DATE: ISO date. CATEGORY: state name (clock states are validated by the recipe)."
+        },
+        "unit": {"type": ["string", "null"]},
+        "basis": {
+          "enum": ["VERIFIED", "ESTIMATED", "PROXY"],
+          "description": "Refused when stronger than the ingredient allows (equity and valuation are at best ESTIMATED). A contradiction is decisive only when every contradicting measurement is VERIFIED."
+        },
+        "confidence": {"enum": ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]},
+        "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "note": {"type": "string"}
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "neuruh.recipe-engine.eligibility-context.v1",
+  "title": "EligibilityContext",
+  "description": "One candidate's normalized evidence context: identity, as_of, evidence records with custody state, and signal observations that cite that evidence. Recipe-agnostic by construction: rank, score, primary_recipe, signal_tags, component_contributions, stage, lead and contact fields are refused.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "tenant_id",
+    "universe_id",
+    "opportunity_id",
+    "asset_id",
+    "as_of",
+    "evidence",
+    "signals"
+  ],
+  "properties": {
+    "schema_version": {"const": "neuruh.recipe-engine.eligibility-context.v1"},
+    "mode": {"enum": ["FIXTURE", "SHADOW", "LIVE", "SYNTHETIC"]},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "universe_id": {"type": "string", "minLength": 1},
+    "opportunity_id": {"type": "string", "minLength": 1},
+    "asset_id": {"type": "string", "minLength": 1},
+    "as_of": {"type": "string", "format": "date-time"},
+    "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "signals": {"type": "array", "items": {"$ref": "#/$defs/signal"}}
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "source_id",
+        "source_family",
+        "content_sha256",
+        "observed_at",
+        "ledger_state"
+      ],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "source_id": {"type": "string", "minLength": 1},
+        "source_family": {"type": "string", "minLength": 1},
+        "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "ledger_state": {"enum": ["BOUND", "NOT_EVALUATED", "UNWIRED", "SOURCE_FAILED"]},
+        "ledger_ref": {"type": ["string", "null"], "minLength": 1},
+        "withdrawn_at": {"type": ["string", "null"], "format": "date-time"},
+        "media_type": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "signal_id",
+        "signal_type",
+        "state",
+        "confidence",
+        "evidence_refs",
+        "source_families",
+        "observed_at"
+      ],
+      "properties": {
+        "signal_id": {"type": "string", "minLength": 1},
+        "signal_type": {"type": "string", "minLength": 1},
+        "state": {"enum": ["PRESENT", "ABSENT", "UNKNOWN", "CONFLICTED"]},
+        "confidence": {"enum": ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]},
+        "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "source_families": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "note": {"type": "string"}
+      }
+    }
+  }
+}
