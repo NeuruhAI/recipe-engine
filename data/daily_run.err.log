@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/run.py", line 250, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/run.py", line 138, in main
+    conn = persist.connect(database_url)
+  File "/Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/recipe_engine/persist.py", line 25, in connect
+    return psycopg.connect(database_url, autocommit=False)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/.venv/lib/python3.14/site-packages/psycopg/connection.py", line 100, in connect
+    attempts = conninfo_attempts(params)
+  File "/Users/jeramiehicks/Neuruh/Neuruh Builds Canotical/Neuruh/NeuruhAI/recipe-engine/.venv/lib/python3.14/site-packages/psycopg/_conninfo_attempts.py", line 55, in conninfo_attempts
+    raise last_exc
+psycopg.OperationalError: failed to resolve host 'aws-0-us-east-2.pooler.supabase.com': [Errno 8] nodename nor servname provided, or not known

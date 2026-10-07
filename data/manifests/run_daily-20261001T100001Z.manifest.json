@@ -1,0 +1,227 @@
+{
+  "counts": {
+    "anchors": 13,
+    "cache_hits": 0,
+    "engine_called": 23,
+    "engine_ok": 23,
+    "events_seen": 38,
+    "events_upserted": 2,
+    "in_territory": 23,
+    "pages_fetched": 13,
+    "report_only": 15
+  },
+  "engine_failures": [],
+  "node_records": [
+    {
+      "listing_id": "5058363",
+      "node_id": "3b14d21b-f2ca-4e40-81e9-16d1f008b27a",
+      "parcel_apn": "estate-5058363"
+    },
+    {
+      "listing_id": "5072223",
+      "node_id": "aa09bbb2-4c45-4748-bab3-a80e94cb3bca",
+      "parcel_apn": "estate-5072223"
+    },
+    {
+      "listing_id": "5101149",
+      "node_id": "65054f68-1e7a-4c10-9aff-2395c1374d7b",
+      "parcel_apn": "estate-5101149"
+    },
+    {
+      "listing_id": "5072208",
+      "node_id": "4be5bca5-2b5d-48da-8e96-3a3e3dc4b77f",
+      "parcel_apn": "estate-5072208"
+    },
+    {
+      "listing_id": "5080932",
+      "node_id": "1bdab58a-c776-48be-b82b-915957b51158",
+      "parcel_apn": "estate-5080932"
+    },
+    {
+      "listing_id": "5093115",
+      "node_id": "e243dd08-c7c7-4065-ae19-0b7c185c324e",
+      "parcel_apn": "estate-5093115"
+    },
+    {
+      "listing_id": "5072235",
+      "node_id": "e1dbf09c-601c-4876-9c38-dfcf2afff203",
+      "parcel_apn": "estate-5072235"
+    },
+    {
+      "listing_id": "5096118",
+      "node_id": "9d50637e-ea1f-4a2a-87fc-3d3ff9128aad",
+      "parcel_apn": "estate-5096118"
+    },
+    {
+      "listing_id": "5092716",
+      "node_id": "f2e0a427-0bf6-4b6a-8163-b47a3306e77e",
+      "parcel_apn": "estate-5092716"
+    },
+    {
+      "listing_id": "4958115",
+      "node_id": "678a0c20-b2e4-4c94-8bae-34cbea22a707",
+      "parcel_apn": "estate-4958115"
+    },
+    {
+      "listing_id": "5093016",
+      "node_id": "584fb250-1af5-470e-8f55-14fcf05f2ca4",
+      "parcel_apn": "estate-5093016"
+    },
+    {
+      "listing_id": "5092050",
+      "node_id": "eab08fe6-c137-4ecf-b38b-cd55b382dfce",
+      "parcel_apn": "estate-5092050"
+    },
+    {
+      "listing_id": "5076879",
+      "node_id": "14531f8c-f9ed-41fb-a6df-c1af1f5d9d27",
+      "parcel_apn": "estate-5076879"
+    },
+    {
+      "listing_id": "5075835",
+      "node_id": "1d81ddbf-7f63-4d54-86f8-0057521ddb52",
+      "parcel_apn": "estate-5075835"
+    },
+    {
+      "listing_id": "5072244",
+      "node_id": "c8ba1fba-62a0-45b7-952d-a471dcf15fbb",
+      "parcel_apn": "estate-5072244"
+    },
+    {
+      "listing_id": "5091426",
+      "node_id": "473fcb66-6704-4760-9f52-de8a918e3516",
+      "parcel_apn": "estate-5091426"
+    },
+    {
+      "listing_id": "5097453",
+      "node_id": "564e9f2f-9866-4e30-a770-53e75d17a35e",
+      "parcel_apn": "estate-5097453"
+    },
+    {
+      "listing_id": "5079918",
+      "node_id": "193c156a-8c68-4ded-a90c-0f75ad8d5cfa",
+      "parcel_apn": "estate-5079918"
+    },
+    {
+      "listing_id": "5098071",
+      "node_id": "df69ff23-9471-4986-af28-b7021a472fe1",
+      "parcel_apn": "estate-5098071"
+    },
+    {
+      "listing_id": "5052087",
+      "node_id": "07c52e72-eadf-4241-a5b1-70a88569a8c3",
+      "parcel_apn": "estate-5052087"
+    },
+    {
+      "listing_id": "5092185",
+      "node_id": "5ec905b2-dbdd-4bd4-8721-59380648b49f",
+      "parcel_apn": "estate-5092185"
+    },
+    {
+      "listing_id": "5101050",
+      "node_id": "b1017b7c-bce7-4ce2-8ec2-5c5cc006f081",
+      "parcel_apn": "estate-5101050"
+    },
+    {
+      "listing_id": "5092734",
+      "node_id": "a0226cdc-eb19-4fd9-b1d5-d2cb5517d1ff",
+      "parcel_apn": "estate-5092734"
+    }
+  ],
+  "per_anchor": {
+    "benton-harbor": {
+      "duplicates_removed": 0,
+      "events_on_page": 12,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:42.1167_-86.4542_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 10
+    },
+    "berrien-springs": {
+      "duplicates_removed": 26,
+      "events_on_page": 26,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.9464_-86.3389_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "buchanan": {
+      "duplicates_removed": 26,
+      "events_on_page": 29,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.8273_-86.3611_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 1
+    },
+    "coloma": {
+      "duplicates_removed": 11,
+      "events_on_page": 14,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:42.1861_-86.3083_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "dowagiac": {
+      "duplicates_removed": 24,
+      "events_on_page": 24,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.9842_-86.1086_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "edwardsburg": {
+      "duplicates_removed": 19,
+      "events_on_page": 19,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.7948_-86.0803_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "elkhart": {
+      "duplicates_removed": 18,
+      "events_on_page": 18,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.682_-85.9767_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "granger": {
+      "duplicates_removed": 20,
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.7536_-86.1108_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "mishawaka": {
+      "duplicates_removed": 20,
+      "events_on_page": 20,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.662_-86.1586_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "new-buffalo": {
+      "duplicates_removed": 13,
+      "events_on_page": 16,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.7937_-86.7439_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "niles": {
+      "duplicates_removed": 10,
+      "events_on_page": 26,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.8298_-86.2542_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 12
+    },
+    "saint-joseph-mi": {
+      "duplicates_removed": 11,
+      "events_on_page": 11,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:42.1098_-86.4801_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    },
+    "south-bend": {
+      "duplicates_removed": 23,
+      "events_on_page": 24,
+      "final_url": "https://www.estatesales.net/api/sale-details?bypass=bycoordinatesanddistance:41.6764_-86.252_25&select=id,name,orgName,address,cityName,stateCode,postalCodeNumber,latitude,longitude,type,isLocallyFeatured,isRegionallyFeaturedThisWeek,isNationallyFeaturedThisWeek,isMarketplaceSale,firstLocalStartDate,lastLocalEndDate,utcDateFirstPublished,utcShowAddressAfter,primaryMetroAreaId&explicitTypes=DateTime",
+      "from_cache": false,
+      "in_territory": 0
+    }
+  },
+  "run_id": "daily-20261001T100001Z",
+  "source": "estatesales.net:/api/sale-details",
+  "started_at": "2026-10-01T10:00:02.939230+00:00"
+}
