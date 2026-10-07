@@ -3,6 +3,8 @@ no-mutation, secret scan, loopback binding."""
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import json
 import pathlib
 import re
@@ -128,7 +130,7 @@ def test_approval_does_not_execute(service):
     res = service.create_mission(objective="status", idempotency_key="mut2")
     mid = res["envelope"]["mission_id"]
     out = service.approve_plan(mid, reason="ok", idempotency_key="mut2a",
-                               expected_version=res["envelope"]["version"])
+                               expected_version=res["envelope"]["version"], decider=FOUNDER)
     assert out["executed"] is False
     # no EXECUTING transition was ever recorded
     states = [e["next_state"] for e in service.events(mid)["events"]]

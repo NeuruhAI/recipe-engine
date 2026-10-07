@@ -31,13 +31,13 @@ class FounderRuntimeClient:
 
     def _req(self, method: str, path: str, body: dict | None = None,
              idempotency_key: str | None = None, expected_version: int | None = None,
-             auth: bool = True) -> Any:
+             auth: bool = True, bearer: str | None = None) -> Any:
         url = self._base + path
         data = None if body is None else json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Content-Type", "application/json")
         if auth:
-            req.add_header("Authorization", f"Bearer {self._token}")
+            req.add_header("Authorization", f"Bearer {bearer if bearer is not None else self._token}")
         if idempotency_key:
             req.add_header("Idempotency-Key", idempotency_key)
         if expected_version is not None:
@@ -92,6 +92,7 @@ class FounderRuntimeClient:
     # writes
     def create_mission(self, objective: str, *, title: str = "", done_criteria: str = "",
                        work_spec: Mapping[str, Any] | None = None,
+                       continuation: Mapping[str, Any] | None = None,
                        idempotency_key: str | None = None) -> dict:
         body: dict[str, Any] = {
             "objective": objective,
@@ -100,14 +101,20 @@ class FounderRuntimeClient:
         }
         if work_spec is not None:
             body["work_spec"] = dict(work_spec)
+        if continuation is not None:
+            body["continuation"] = dict(continuation)
         return self._req("POST", "/v1/missions",
                          body=body,
                          idempotency_key=idempotency_key or self._key())
 
-    def approve(self, mission_id: str, *, reason: str = "", idempotency_key: str | None = None,
-                expected_version: int | None = None) -> dict:
+    # G-1: the two approve routes accept ONLY the founder credential; the operator
+    # token this client holds is refused there (403 OPERATOR_TOKEN_NOT_FOUNDER).
+    # The founder token is passed per call and never stored on the client.
+    def approve(self, mission_id: str, *, founder_token: str, reason: str = "",
+                idempotency_key: str | None = None, expected_version: int | None = None) -> dict:
         return self._req("POST", f"/v1/missions/{mission_id}/approve", body={"reason": reason},
-                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version,
+                         bearer=founder_token)
 
     def reject(self, mission_id: str, *, reason: str, idempotency_key: str | None = None,
                expected_version: int | None = None) -> dict:
@@ -116,10 +123,11 @@ class FounderRuntimeClient:
 
     # The authority gate is a different act from a plan decision: only a gate
     # ALLOW carries the signed artifact a parked live mission can consume.
-    def approve_gate(self, mission_id: str, *, reason: str = "", idempotency_key: str | None = None,
-                     expected_version: int | None = None) -> dict:
+    def approve_gate(self, mission_id: str, *, founder_token: str, reason: str = "",
+                     idempotency_key: str | None = None, expected_version: int | None = None) -> dict:
         return self._req("POST", f"/v1/missions/{mission_id}/gate/approve", body={"reason": reason},
-                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version)
+                         idempotency_key=idempotency_key or self._key(), expected_version=expected_version,
+                         bearer=founder_token)
 
     def reject_gate(self, mission_id: str, *, reason: str, idempotency_key: str | None = None,
                     expected_version: int | None = None) -> dict:
@@ -166,6 +174,19 @@ class FounderRuntimeClient:
                 "execution_outcome", body.get("execution_id"), body.get("outcome"),
                 receipt.get("receipt_sha") or court.get("record_sha") or ""))
         return self._req("POST", f"/v1/missions/{mission_id}/execution-outcomes", body=dict(body),
+                         idempotency_key=idempotency_key, expected_version=expected_version)
+
+    # Governed completion: ``body`` is an fr.reconcile_request.v1 carrying the
+    # full sealed court record. Default key = the evidence identity, so a
+    # retried reconcile of the same evidence is a replay by construction.
+    def reconcile(self, mission_id: str, body: Mapping[str, Any], *,
+                  idempotency_key: str | None = None,
+                  expected_version: int | None = None) -> dict:
+        if idempotency_key is None:
+            record = body.get("court_record") or {}
+            idempotency_key = ":".join(str(part) for part in (
+                "reconcile", body.get("execution_id"), record.get("court_id") or ""))
+        return self._req("POST", f"/v1/missions/{mission_id}/reconcile", body=dict(body),
                          idempotency_key=idempotency_key, expected_version=expected_version)
 
     def stream_events(self, mission_id: str, *, after: int | str | None = None,

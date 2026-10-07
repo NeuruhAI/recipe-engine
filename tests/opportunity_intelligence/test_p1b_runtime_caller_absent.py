@@ -1,11 +1,15 @@
-"""P1B court: no existing runtime loop calls evaluate_recipes.
+"""P1B court, as bound by T11: exactly one runtime calls the eligibility producer.
 
-LIBRARY + HARNESS + CLI are already bound on main. This court proves the
-named runtime candidates still do not import or invoke evaluate_recipes, so
-RUNTIME_CALL_PATH remains CALLER_ABSENT until an owner publishes a context
-producer, a policy set, and a chosen receipt channel.
+2026-09-08 (P1B, e93f2ac) sealed RUNTIME_CALL_PATH=CALLER_ABSENT: LIBRARY + HARNESS +
+CLI existed and no runtime loop called them. 2026-09-15 (T11) bound the one caller the
+three missing seams described -- ``scripts/run_opportunity_eligibility.py`` over the
+compiled canonical 30, persisted through DeedSonar ``candidate_recipe_membership``.
 
-Does not invent a bind, daemon, store, or membership path.
+What stays locked: the named runtime candidates (the ranker ladder, the daily estate-sale
+hunt, Founder Runtime, the LandOS score caller, closed loop, autonomy) still never import
+or invoke the producer; the bound runtime reaches it only through the compiler.
+
+Does not invent a daemon, a store, or a second membership path.
 """
 
 from __future__ import annotations
@@ -146,20 +150,40 @@ def test_library_still_emits_match_no_match_unknown_on_sealed_fixture():
     assert receipts[C].content_sha256 == expected[C]["content_sha256"]
 
 
-def test_caller_absent_receipt_and_census_agree():
+RUNTIME = "scripts/run_opportunity_eligibility.py"
+RUNTIME_LIBRARY = "recipe_engine/opportunity_intelligence/eligibility_runtime.py"
+
+
+def test_the_bound_runtime_reaches_the_producer_only_through_the_compiler():
+    library = ast.parse((ROOT / RUNTIME_LIBRARY).read_text(encoding="utf-8"))
+    assert _imported_or_called(library, "evaluate_canonical_recipes")
+    for name in ("evaluate_recipes", "evaluate_eligibility"):
+        assert not _imported_or_called(library, name)
+    runtime = ast.parse((ROOT / RUNTIME).read_text(encoding="utf-8"))
+    assert _imported_or_called(runtime, "evaluate_property")
+    assert RUNTIME not in RUNTIME_CANDIDATES and RUNTIME_LIBRARY not in RUNTIME_CANDIDATES
+
+
+def test_runtime_bound_receipt_and_census_agree():
     receipt = json.loads(RECEIPT.read_text(encoding="utf-8"))
-    assert receipt["SUCCESS_CRITERION"] == "RUNTIME_CALL_PATH=CALLER_ABSENT"
-    assert receipt["RUNTIME_CALL_PATH"] == "CALLER_ABSENT"
-    assert receipt["SUPABASE_MUTATED"] == "NO"
-    assert receipt["DEEDSONAR_MUTATED"] == "NO"
+    assert receipt["SUCCESS_CRITERION"] == "RUNTIME_CALL_PATH=BOUND"
+    assert receipt["RUNTIME_CALL_PATH"] == "BOUND"
+    assert receipt["RUNTIME_CALLER"]["cli"] == RUNTIME
+    assert (ROOT / RUNTIME).is_file() and (ROOT / RUNTIME_LIBRARY).is_file()
     assert receipt["NEW_DAEMON"] == "NO"
+    assert receipt["LEAD_PROMOTION"] == "NO" and receipt["CONTACT_AUTHORITY"] == "NO"
+    [history] = receipt["HISTORY"]
+    assert history["RUNTIME_CALL_PATH"] == "CALLER_ABSENT" and history["BASE_SHA"].startswith("e93f2ac")
+    assert set(receipt["SEAMS_CLOSED"]) == set(history["MISSING_SEAMS"])
     census = CENSUS.read_text(encoding="utf-8").splitlines()
     assert census[0].startswith("candidate\t")
-    bound = [line for line in census[1:] if line.split("\t")[-1].startswith("BOUND_")]
-    absent = [line for line in census[1:] if line.endswith("\tCALLER_ABSENT")]
-    assert len(bound) == 3
-    assert len(absent) >= 12
-    for rel in receipt["SEARCHED_NOT_BOUND"]:
+    classes = [line.split("\t")[-1] for line in census[1:]]
+    assert classes.count("BOUND_RUNTIME") == 1
+    assert {"BOUND_LIBRARY", "BOUND_HARNESS", "BOUND_CLI_NOT_RUNTIME", "BOUND_CATALOG",
+            "BOUND_CONTEXT_PRODUCER"} <= set(classes)
+    assert "MISSING_SEAM" not in {line.split("\t")[2] for line in census[1:]}
+    assert classes.count("CALLER_ABSENT") >= 12   # the named candidates stay unbound
+    for rel in history["SEARCHED_NOT_BOUND"]:
         if rel == "recipe_engine/founder_runtime":
             assert (ROOT / rel).is_dir()
             continue

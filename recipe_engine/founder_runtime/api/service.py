@@ -27,6 +27,7 @@ from recipe_engine.autonomy.models import (
 )
 from recipe_engine.founder_runtime import RUNTIME_VERSION
 from recipe_engine.founder_runtime.adapters.fixture_governance import FixtureGovernance
+from recipe_engine.founder_runtime.api.identity import Decider
 from recipe_engine.founder_runtime.api.founder_signing import (
     APPROVAL_TTL_SECONDS,
     FounderApprovalSigner,
@@ -39,9 +40,14 @@ from recipe_engine.founder_runtime.contracts.events import EventType
 from recipe_engine.founder_runtime.contracts.mission import Mission
 from recipe_engine.founder_runtime.contracts.work_spec import validate_work_spec_request
 from recipe_engine.founder_runtime.errors import (
-    ApprovalRequired, AuthorityDenied, ExecutionOutcomeMalformed, ExecutionOutcomeRejected,
-    FounderRuntimeError, MissionNotFound,
-    MissionSchemaInvalid, PersistenceConflict, StateTransitionInvalid,
+    ApprovalRequired, AuthorityDenied, CompletionCriteriaFailed, ExecutionOutcomeMalformed,
+    ExecutionOutcomeRejected, FounderRuntimeError, MissionNotFound,
+    MissionSchemaInvalid, PersistenceConflict, ReceiptInvalid, ReconcileMalformed,
+    ReconcileRejected, StateTransitionInvalid,
+)
+from recipe_engine.founder_runtime.evidence.reconciliation import (
+    CONTINUATION_KEY_PREFIX, build_lineage, continuation_creation_key, validate_continuation_plan,
+    verify_continuation_plan,
 )
 from recipe_engine.founder_runtime.evidence.claims import build_claims_from_fixtures
 from recipe_engine.founder_runtime.ids import hash_payload, new_uuid, stable_id
@@ -49,6 +55,10 @@ from recipe_engine.founder_runtime.missions.long_horizon import (
     GOV_APPROVAL_REF_PREFIX,
     governance_approval_from,
 )
+
+# Condition recorded on a gate ALLOW whose Governance artifact was minted late,
+# naming the earlier artifact-less record of the same decision it binds.
+GOV_ARTIFACT_LATE_BOUND_PREFIX = "governance_artifact_late_bound_for:"
 from recipe_engine.founder_runtime.runtime import approval_resolver as resolver
 from recipe_engine.founder_runtime.runtime.approvals import assert_approval_usable, gated_action_for
 from recipe_engine.founder_runtime.runtime.mission_runtime import MissionRuntime
@@ -77,7 +87,7 @@ _ALLOWED_NEXT = {
     "QUEUED": ["get", "pause", "cancel"],
     "EXECUTING": ["get", "pause", "cancel"],
     "VERIFYING": ["get", "pause", "cancel"],
-    "RECONCILING": ["get", "pause", "cancel"],
+    "RECONCILING": ["get", "reconcile", "pause", "cancel"],
     "PAUSED": ["get", "resume", "cancel", "recover"],
     "RECOVERING": ["get", "recover", "cancel"],
     "FAILED_RETRYABLE": ["get", "recover", "cancel"],
@@ -213,6 +223,18 @@ class MissionService:
         receipts = self.runtime.store.list_receipts(mission.mission_id)
         rid = receipt_id or (receipts[-1].receipt_id if receipts else None) or stable_id(
             "env", mission.mission_id, mission.version, mission.current_state.value)
+        extensions = mission.extensions or {}
+        lineage = extensions.get("lineage") if isinstance(extensions.get("lineage"), dict) else None
+        plan = extensions.get("continuation_plan") if isinstance(extensions.get("continuation_plan"), dict) else None
+        continuation = None
+        if plan is not None:
+            key = continuation_creation_key(mission.mission_id, str(plan.get("plan_sha256") or ""))
+            child = self._continuation_child(mission.mission_id, key)
+            continuation = {
+                "plan_sha256": plan.get("plan_sha256"),
+                "creation_key": key,
+                "child_mission_id": child.mission_id if child is not None else None,
+            }
         return {
             "api_version": API_VERSION,
             "runtime_version": RUNTIME_VERSION,
@@ -228,6 +250,15 @@ class MissionService:
             "blocked_actions": list(_BLOCKED_ALWAYS),
             "freshness": {"observed_at": self.clock.now_iso(), "stale": False},
             "receipt_id": rid,
+            # Lineage: a continuation child names the completed parent it
+            # continues. Deliberately NOT surfaced as `parent_mission_id`: the
+            # workers bridge reads that field as "resume this parent's waiting
+            # jobs", which a COMPLETED parent must never have done on its behalf.
+            "lineage": lineage,
+            "completion": ({"completion_hash": extensions.get("completion_hash"),
+                            "outcome_ref": extensions.get("outcome_ref")}
+                           if extensions.get("completion_hash") else None),
+            "continuation": continuation,
         }
 
     # ---- helpers ----
@@ -518,7 +549,32 @@ class MissionService:
     # ---- public operations ----
     def create_mission(self, *, objective: str, title: str = "", done_criteria: str = "",
                        work_spec: Mapping[str, Any] | None = None,
+                       continuation: Mapping[str, Any] | None = None,
                        idempotency_key: str, expected_version: int | None = None) -> dict[str, Any]:
+        if idempotency_key.startswith(CONTINUATION_KEY_PREFIX):
+            # Continuation children are created by the runtime under a key derived
+            # from their parent; a caller claiming one would squat the child's slot.
+            raise ApiError(422, "IDEMPOTENCY_KEY_RESERVED",
+                           "the continuation idempotency namespace is reserved for the runtime",
+                           {"prefix": CONTINUATION_KEY_PREFIX})
+        plan = None
+        if continuation is not None:
+            if work_spec is None:
+                raise ApiError(422, "CONTINUATION_INVALID",
+                               "only an executable (work-spec) mission can declare a continuation", {})
+            try:
+                plan = validate_continuation_plan(continuation)
+            except MissionSchemaInvalid as exc:
+                raise ApiError(422, "CONTINUATION_INVALID", exc.message, exc.details) from exc
+        return self._create_mission_impl(objective=objective, title=title, done_criteria=done_criteria,
+                                         work_spec=work_spec, continuation_plan=plan, lineage=None,
+                                         idempotency_key=idempotency_key)
+
+    def _create_mission_impl(self, *, objective: str, title: str, done_criteria: str,
+                             work_spec: Mapping[str, Any] | None,
+                             continuation_plan: Mapping[str, Any] | None,
+                             lineage: Mapping[str, Any] | None,
+                             idempotency_key: str) -> dict[str, Any]:
         try:
             normalized_work_spec = (
                 validate_work_spec_request(work_spec) if work_spec is not None else None
@@ -532,6 +588,13 @@ class MissionService:
         }
         if normalized_work_spec is not None:
             request_material["work_spec"] = normalized_work_spec
+        extra_extensions: dict[str, Any] = {}
+        if continuation_plan is not None:
+            request_material["continuation_plan_sha256"] = continuation_plan["plan_sha256"]
+            extra_extensions["continuation_plan"] = dict(continuation_plan)
+        if lineage is not None:
+            request_material["lineage_sha256"] = lineage["lineage_sha256"]
+            extra_extensions["lineage"] = dict(lineage)
         request_hash = hash_payload(request_material)
         cached = self._idem_lookup(idempotency_key, request_hash)
         if cached is not None:
@@ -545,6 +608,7 @@ class MissionService:
                     request_text,
                     creation_idempotency_key=idempotency_key,
                     work_spec=normalized_work_spec,
+                    extra_extensions=extra_extensions or None,
                 )
             except PersistenceConflict as exc:
                 raise ApiError(
@@ -553,6 +617,19 @@ class MissionService:
                     "mission creation idempotency key was reused for different material",
                     {"key": idempotency_key},
                 ) from exc
+            # The store's creation identity is request-only (objective, work spec);
+            # a retried key must also carry the same continuation and lineage.
+            stored_ext = mission.extensions or {}
+            for key, wanted in extra_extensions.items():
+                if stored_ext.get(key) != wanted:
+                    raise ApiError(409, "IDEMPOTENCY_CONFLICT",
+                                   "mission creation idempotency key was reused for different material",
+                                   {"key": idempotency_key, "field": key})
+            for key in ("continuation_plan", "lineage"):
+                if key not in extra_extensions and stored_ext.get(key) is not None:
+                    raise ApiError(409, "IDEMPOTENCY_CONFLICT",
+                                   "mission creation idempotency key was reused for different material",
+                                   {"key": idempotency_key, "field": key})
             mid = mission.mission_id
             result: dict[str, Any]
             if existing is not None:
@@ -636,7 +713,17 @@ class MissionService:
 
     def _record_decision(self, mission_id: str, *, decision: ApprovalDecision, reason: str,
                          idempotency_key: str, expected_version: int | None,
-                         gate: bool = False) -> dict[str, Any]:
+                         decider: Decider, gate: bool = False) -> dict[str, Any]:
+        # G-1: an ALLOW is the founder's act. The HTTP surface already refuses the
+        # operator token on the approve routes; this is the same rule in the
+        # service, so no in-process caller can record (or get signed) an ALLOW
+        # under an identity that did not authenticate as the founder.
+        if not isinstance(decider, Decider):
+            raise ApiError(500, "DECIDER_REQUIRED", "a decision needs an authenticated decider", {})
+        if decision == ApprovalDecision.ALLOW and not decider.founder:
+            raise ApiError(403, "FOUNDER_REQUIRED",
+                           "only a founder-authenticated decider may record an ALLOW; nothing was recorded",
+                           {"decided_by": decider.identity})
         with self._lock:
             self._require_expected_version(expected_version)
             mission = self._get(mission_id)
@@ -646,6 +733,8 @@ class MissionService:
                 "reason": reason,
                 "mission_id": mission_id,
                 "gate": gate,
+                # The same key under a different identity is a different request.
+                "decided_by": decider.identity,
             }
             if mission.work_spec_sha256 is not None:
                 request_material["work_spec_sha256"] = mission.work_spec_sha256
@@ -675,6 +764,7 @@ class MissionService:
             else:
                 requested_action = f"plan_decision:{decision.value}"
                 scope = mission.plan_id or mission_id
+            same_decision: list[Approval] = []
             for existing in self.runtime.store.list_approvals(mission_id):
                 if existing.decision not in (ApprovalDecision.ALLOW, ApprovalDecision.DENY):
                     continue
@@ -682,18 +772,40 @@ class MissionService:
                     continue
                 if (existing.decision == decision
                         and existing.exact_requested_action == requested_action):
-                    # Identical semantic replay: return the existing terminal decision.
-                    body = self._envelope(self._get(mission_id), receipt_id=existing.approval_id,
-                                          evidence_refs=[existing.approval_id])
-                    return {"envelope": body, "approval": existing.to_dict(),
-                            "authority_state": existing.decision.value,
-                            "executed": False, "idempotent_replay": True,
-                            "note": "approval already recorded; plan NOT executed (no mutation authority in V1)"}
+                    same_decision.append(existing)
+                    continue
                 raise ApiError(409, "DECISION_CONFLICT",
                                "a terminal authority decision already exists for this "
                                "mission/plan/scope; conflicting decisions are refused",
                                {"existing_decision": existing.decision.value,
                                 "approval_id": existing.approval_id})
+            # Identical semantic replay: the decision stands, exactly once. The one
+            # thing a repeated gate ALLOW may add is the Governance artifact that a
+            # decision recorded BEFORE the mission published its authorization
+            # request could never carry: Governance was not yet answering
+            # founder_required for it (an expired ratification parks the mission
+            # as unresolved and publishes nothing), so there was no scope_key to
+            # bind a signature to, and the latch then replayed that artifact-less
+            # record forever -- the founder's decision existed but could never be
+            # presented. Late binding mints the missing artifact against the
+            # request the mission has SINCE published, bound to the same scope,
+            # source SHA and tier Governance named. The decision never changes and
+            # is never stacked: with no publication, no signer, or an artifact
+            # already bound, the existing record is returned exactly as before.
+            late_bind_source: Approval | None = None
+            if same_decision:
+                bound = [a for a in same_decision if governance_approval_from(a) is not None]
+                can_late_bind = (
+                    not bound
+                    and gate
+                    and decision == ApprovalDecision.ALLOW
+                    and decider.founder
+                    and self.signer.configured
+                    and self.runtime.published_authorization_request(mission_id) is not None
+                )
+                if not can_late_bind:
+                    return self._replay_decision(mission_id, bound[0] if bound else same_decision[0])
+                late_bind_source = same_decision[0]
             if mission.current_state not in (MissionState.AWAITING_APPROVAL, MissionState.BLOCKED_POLICY):
                 raise ApiError(409, "NOT_AWAITING_APPROVAL",
                                "mission is not awaiting an approval decision",
@@ -726,7 +838,7 @@ class MissionService:
                     resolver.WORK_SPEC_SHA256_EVIDENCE_PREFIX + mission.work_spec_sha256,
                 )
             signed_note = None
-            if gate and decision == ApprovalDecision.ALLOW:
+            if gate and decision == ApprovalDecision.ALLOW and decider.founder:
                 signed_note = self._mint_gate_artifact(
                     mission_id,
                     action=requested_action,
@@ -736,6 +848,13 @@ class MissionService:
                 )
                 if signed_note is not None:
                     evidence_refs.append(signed_note)
+            conditions = [reason] if reason else []
+            if late_bind_source is not None:
+                if signed_note is None:
+                    # The published request does not match this gate (or the signer
+                    # refused): nothing new can be bound, so nothing new is recorded.
+                    return self._replay_decision(mission_id, late_bind_source)
+                conditions.append(GOV_ARTIFACT_LATE_BOUND_PREFIX + late_bind_source.approval_id)
             approval = Approval(
                 schema_version=SCHEMA_APPROVAL,
                 approval_id=new_uuid("appr"),
@@ -744,9 +863,9 @@ class MissionService:
                 exact_requested_action=requested_action,
                 scope=scope,
                 requested_by="founder",
-                decided_by="jeramie",
+                decided_by=decider.identity,
                 decision=decision,
-                conditions=[reason] if reason else [],
+                conditions=conditions,
                 expiry=None,
                 evidence_refs=evidence_refs,
                 created_at=now,
@@ -774,6 +893,15 @@ class MissionService:
                       "note": "approval recorded; plan NOT executed (no mutation authority in V1)"}
             self._idem_store(idempotency_key, request_hash, result)
             return result
+
+    def _replay_decision(self, mission_id: str, existing: Approval) -> dict[str, Any]:
+        """Return the terminal decision already recorded for this scope, unchanged."""
+        body = self._envelope(self._get(mission_id), receipt_id=existing.approval_id,
+                              evidence_refs=[existing.approval_id])
+        return {"envelope": body, "approval": existing.to_dict(),
+                "authority_state": existing.decision.value,
+                "executed": False, "idempotent_replay": True,
+                "note": "approval already recorded; plan NOT executed (no mutation authority in V1)"}
 
     def _mint_gate_artifact(
         self,
@@ -946,17 +1074,25 @@ class MissionService:
         # 3. An externally decided ALLOW (the founder, over the gate route). It
         #    is never spent on its own say-so: its SIGNED artifact is presented
         #    to Governance, and only Governance's allow spends it.
+        #    Of the usable human decisions, the one carrying a signed artifact is
+        #    the one Governance can verify; an earlier artifact-less record of the
+        #    same decision (recorded before the request was published) is not
+        #    preferred merely for being first.
         external = None
         for existing in approvals:
             if resolver.is_governance_decided(existing):
                 continue
-            if (
+            if not (
                 self._usable(existing, mission_id=mission_id, action=action, scope=scope, now=now)
                 and (
                     mission.work_spec_sha256 is None
                     or resolver.bound_work_spec_sha256(existing) == mission.work_spec_sha256
                 )
             ):
+                continue
+            if external is None:
+                external = existing
+            if governance_approval_from(existing) is not None:
                 external = existing
                 break
         founder_approval = governance_approval_from(external) if external is not None else None
@@ -1019,7 +1155,18 @@ class MissionService:
             # Publish what the founder's signature must bind to, unless the
             # mission already published its own request (a long-horizon
             # mission is its own publisher; never overwrite it).
-            if self.runtime.published_authorization_request(mission_id) is None and res.scope_key:
+            # An api-mode publication that names a source SHA this runtime no
+            # longer attests (the supervised pin moved under a parked mission)
+            # is stale: a signature bound to it can only ever be refused
+            # APPROVAL_SOURCE_MISMATCH, so the request is published again for
+            # the SHA that will actually present it.
+            published = self.runtime.published_authorization_request(mission_id)
+            stale_api_publication = (
+                published is not None
+                and published.get("mode") == "api"
+                and published.get("source_sha") != self.attested_source_sha
+            )
+            if (published is None or stale_api_publication) and res.scope_key:
                 self.runtime.record_authorization_request(mission_id, {
                     "mission_id": mission_id,
                     "action": action,
@@ -1054,6 +1201,8 @@ class MissionService:
         if res.outcome == resolver.FOUNDER_REQUIRED:
             out["founder_gate"] = {
                 "approve_route": "/v1/missions/{mission_id}/gate/approve",
+                "approve_auth": "founder credential only; the operator token is refused (403 OPERATOR_TOKEN_NOT_FOUNDER)",
+                "approve_command": "neuruh-approve {mission_id} --gate --reason \"...\"",
                 "reject_route": "/v1/missions/{mission_id}/gate/reject",
                 "resolve_route": "/v1/missions/{mission_id}/gate/resolve",
                 "signs": "gov.founder.approval.v1 scope_once bound to the published scope_key + source_sha + risk_tier",
@@ -1062,19 +1211,21 @@ class MissionService:
         return out
 
     def approve_plan(self, mission_id: str, *, reason: str, idempotency_key: str,
-                     expected_version: int | None = None) -> dict[str, Any]:
+                     expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
         return self._record_decision(mission_id, decision=ApprovalDecision.ALLOW, reason=reason,
-                                     idempotency_key=idempotency_key, expected_version=expected_version)
+                                     idempotency_key=idempotency_key, expected_version=expected_version,
+                                     decider=decider)
 
     def reject_plan(self, mission_id: str, *, reason: str, idempotency_key: str,
-                    expected_version: int | None = None) -> dict[str, Any]:
+                    expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
         if not reason:
             raise ApiError(422, "REASON_REQUIRED", "rejection requires a reason", {})
         return self._record_decision(mission_id, decision=ApprovalDecision.DENY, reason=reason,
-                                     idempotency_key=idempotency_key, expected_version=expected_version)
+                                     idempotency_key=idempotency_key, expected_version=expected_version,
+                                     decider=decider)
 
     def approve_mission_gate(self, mission_id: str, *, reason: str, idempotency_key: str,
-                             expected_version: int | None = None) -> dict[str, Any]:
+                             expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
         """Record the founder's ALLOW for the mission's authority gate.
 
         This is the external origin the live mission gate requires. It records
@@ -1084,16 +1235,16 @@ class MissionService:
         """
         return self._record_decision(mission_id, decision=ApprovalDecision.ALLOW, reason=reason,
                                      idempotency_key=idempotency_key,
-                                     expected_version=expected_version, gate=True)
+                                     expected_version=expected_version, decider=decider, gate=True)
 
     def reject_mission_gate(self, mission_id: str, *, reason: str, idempotency_key: str,
-                            expected_version: int | None = None) -> dict[str, Any]:
-        """Record the founder's DENY for the mission's authority gate."""
+                            expected_version: int | None = None, decider: Decider) -> dict[str, Any]:
+        """Record a DENY for the mission's authority gate (operator or founder)."""
         if not reason.strip():
             raise ApiError(422, "REASON_REQUIRED", "rejection requires a reason", {})
         return self._record_decision(mission_id, decision=ApprovalDecision.DENY, reason=reason,
                                      idempotency_key=idempotency_key,
-                                     expected_version=expected_version, gate=True)
+                                     expected_version=expected_version, decider=decider, gate=True)
 
     def _lifecycle(self, mission_id: str, *, action: str, idempotency_key: str,
                    expected_version: int | None) -> dict[str, Any]:
@@ -1301,6 +1452,129 @@ class MissionService:
             }
             self._idem_store(idempotency_key, request_hash, response)
             return response
+
+    # ---- governed completion + continuation -----------------------------------
+    def reconcile_mission(self, mission_id: str, *, body: Mapping[str, Any],
+                          idempotency_key: str, expected_version: int | None = None) -> dict[str, Any]:
+        """RECONCILING -> COMPLETED on verified execution evidence, then schedule
+        the continuation the mission declared.
+
+        The body carries the one thing the runtime cannot hold itself: the full
+        sealed Sentinel record whose digest it accepted with COURT_PASSED. The
+        kernel rebuilds everything else from the mission's own chain. Idempotent
+        twice over, like the execution-outcome route: an exact replay returns the
+        stored response, and a COMPLETED mission offered the same evidence is a
+        kernel replay (which also re-ensures its continuation exists).
+        """
+        with self._lock:
+            mission = self._get(mission_id)
+            self._assert_not_corrupted(mission_id)
+            if not isinstance(body, Mapping):
+                raise ApiError(400, "RECONCILE_MALFORMED", "reconcile body must be an object", {})
+            try:
+                request_hash = hash_payload({"route": "reconcile", "mission_id": mission_id,
+                                             "body": dict(body)})
+            except TypeError as exc:
+                raise ApiError(400, "RECONCILE_MALFORMED", "reconcile body is not canonical JSON",
+                               {"cause": str(exc)[:200]}) from exc
+            cached = self._idem_lookup(idempotency_key, request_hash)
+            if cached is not None:
+                cached["idempotent_replay"] = True
+                cached["applied"] = False
+                cached["events_appended"] = []
+                return cached
+            if expected_version is not None:
+                self._assert_version(mission, expected_version)
+            try:
+                result = self.runtime.reconcile_execution(mission_id, body)
+            except ReconcileMalformed as e:
+                raise ApiError(400, "RECONCILE_MALFORMED", e.message, dict(e.details)) from e
+            except ReconcileRejected as e:
+                raise ApiError(409, e.reason_code, e.message, dict(e.details)) from e
+            except MissionNotFound as e:
+                raise ApiError(404, "MISSION_NOT_FOUND", "mission not found", {"mission_id": mission_id}) from e
+            except (CompletionCriteriaFailed, ReceiptInvalid, MissionSchemaInvalid) as e:
+                raise ApiError(409, "COMPLETION_REFUSED", e.message, dict(e.details)) from e
+            except (StateTransitionInvalid, PersistenceConflict) as e:
+                raise ApiError(409, "STATE_TRANSITION_INVALID", str(e), dict(e.details)) from e
+            continuation = None
+            if result["state_after"] == MissionState.COMPLETED.value:
+                try:
+                    continuation = self._schedule_continuation(self._get(mission_id))
+                except ApiError as e:
+                    # Completion stands on its own evidence; a continuation that
+                    # could not be scheduled is reported and retried, never undone.
+                    continuation = {"scheduled": False, "code": e.code, "message": e.message,
+                                    "details": e.details}
+            response = {
+                "envelope": self._envelope(self._get(mission_id)),
+                **result,
+                "verified": True,
+                "continuation": continuation,
+                "note": ("mission completed by the canonical completion verifier on the accepted "
+                         "execution receipt and the independently sealed court record"),
+            }
+            if continuation is None or continuation.get("scheduled") is True:
+                self._idem_store(idempotency_key, request_hash, response)
+            return response
+
+    def _continuation_child(self, parent_mission_id: str, key: str) -> Mission | None:
+        """The mission under a continuation key, only if it really continues this parent."""
+        child = self.runtime.store.get_mission_by_creation_key(key)
+        if child is None:
+            return None
+        lineage = (child.extensions or {}).get("lineage")
+        if not isinstance(lineage, dict) or lineage.get("parent_mission_id") != parent_mission_id:
+            return None
+        return child
+
+    def _schedule_continuation(self, parent: Mission) -> dict[str, Any] | None:
+        """Create the continuation a verifiably COMPLETED mission declared.
+
+        The child is an ordinary mission: it passes its own decision pipeline and
+        its own Governance gate (auto-resolved exactly like any create), so a
+        continuation inherits lineage, never authority. Deterministic creation
+        key: scheduling twice is one child.
+        """
+        plan_raw = (parent.extensions or {}).get("continuation_plan")
+        if plan_raw is None:
+            return None
+        if parent.current_state != MissionState.COMPLETED:
+            raise ApiError(409, "CONTINUATION_PARENT_NOT_COMPLETED",
+                           "a continuation is scheduled only from a completed mission",
+                           {"state": parent.current_state.value})
+        try:
+            plan = verify_continuation_plan(plan_raw)
+        except ReconcileRejected as e:
+            raise ApiError(409, e.reason_code, e.message, dict(e.details)) from e
+        completion = self.runtime.store.get_completion(parent.mission_id)
+        outcome = (self.runtime.outcome_record(completion.outcome_ref, parent.mission_id)
+                   if completion is not None and completion.outcome_ref else None)
+        if completion is None or outcome is None:
+            raise ApiError(409, "CONTINUATION_PARENT_UNVERIFIED",
+                           "completed parent carries no completion report and outcome", {})
+        lineage = build_lineage(parent, completion=completion.to_dict(), outcome=outcome, plan=plan)
+        key = continuation_creation_key(parent.mission_id, plan["plan_sha256"])
+        squatter = self.runtime.store.get_mission_by_creation_key(key)
+        if squatter is not None and self._continuation_child(parent.mission_id, key) is None:
+            raise ApiError(409, "CONTINUATION_KEY_SQUATTED",
+                           "a mission without this parent's lineage holds the continuation key",
+                           {"creation_key": key, "mission_id": squatter.mission_id})
+        created = self._create_mission_impl(
+            objective=plan["objective"], title="", done_criteria=plan["done_criteria"],
+            work_spec=plan["work_spec"], continuation_plan=plan.get("continuation"),
+            lineage=lineage, idempotency_key=key)
+        envelope = created["envelope"]
+        return {
+            "scheduled": True,
+            "idempotent_replay": bool(created.get("idempotent_replay")),
+            "creation_key": key,
+            "child_mission_id": envelope["mission_id"],
+            "child_state": envelope["state"],
+            "child_version": envelope["version"],
+            "lineage_sha256": lineage["lineage_sha256"],
+            "authority_resolution": created.get("authority_resolution"),
+        }
 
     def _recover_impl(self, mission_id: str) -> dict[str, Any]:
         mission = self._get(mission_id)

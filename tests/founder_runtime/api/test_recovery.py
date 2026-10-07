@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import pytest
 
 from recipe_engine.founder_runtime.api.service import MissionService
@@ -50,7 +52,7 @@ def test_no_event_loss_across_restart(tmp_path):
     svc, res = _make(db)
     mid = res["envelope"]["mission_id"]
     svc.approve_plan(mid, reason="ok", idempotency_key="ak",
-                     expected_version=res["envelope"]["version"])
+                     expected_version=res["envelope"]["version"], decider=FOUNDER)
     before = [e["event_hash"] for e in svc.events(mid)["events"]]
     svc.close()
     svc2 = MissionService(db)

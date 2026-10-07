@@ -28,6 +28,8 @@ articles below:
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import ast
 import json
 import os
@@ -361,7 +363,7 @@ class ExternalChannelMintsTheArtifact(unittest.TestCase):
         service = self._service()
         result = service.approve_mission_gate(
             mid, reason="read-only observation approved", idempotency_key="idem-mint",
-            expected_version=self._version(service, mid),
+            expected_version=self._version(service, mid), decider=FOUNDER
         )
         service.close()
 
@@ -395,7 +397,7 @@ class ExternalChannelMintsTheArtifact(unittest.TestCase):
         mid, _, _ = self._park("ttl")
         service = self._service()
         service.approve_mission_gate(mid, reason="ok", idempotency_key="idem-ttl",
-                                     expected_version=self._version(service, mid))
+                                     expected_version=self._version(service, mid), decider=FOUNDER)
         artifact = governance_approval_from(self._rt().store.list_approvals(mid)[0])
         service.close()
         self.assertLess(artifact["bound"]["issued_at"], artifact["bound"]["expires_at"])
@@ -405,7 +407,7 @@ class ExternalChannelMintsTheArtifact(unittest.TestCase):
         service = self._service()
         result = service.reject_mission_gate(
             mid, reason="not now", idempotency_key="idem-reject",
-            expected_version=self._version(service, mid),
+            expected_version=self._version(service, mid), decider=FOUNDER
         )
         service.close()
         self.assertEqual(result["approval"]["decision"], "deny")
@@ -419,7 +421,7 @@ class ExternalChannelMintsTheArtifact(unittest.TestCase):
         service = self._service(configured=False)
         result = service.approve_mission_gate(
             mid, reason="ok", idempotency_key="idem-nokey",
-            expected_version=self._version(service, mid),
+            expected_version=self._version(service, mid), decider=FOUNDER
         )
         service.close()
         self.assertEqual(result["approval"]["decision"], "allow")
@@ -433,7 +435,7 @@ class ExternalChannelMintsTheArtifact(unittest.TestCase):
         mid, organs, gov = self._park("full")
         service = self._service()
         service.approve_mission_gate(mid, reason="ok", idempotency_key="idem-full",
-                                     expected_version=self._version(service, mid))
+                                     expected_version=self._version(service, mid), decider=FOUNDER)
         service.close()
 
         res = _run(self._rt(), organs, key="full")
@@ -460,7 +462,7 @@ class ExternalChannelMintsTheArtifact(unittest.TestCase):
         mid, organs, gov = self._park("again")
         service = self._service()
         service.approve_mission_gate(mid, reason="ok", idempotency_key="idem-again",
-                                     expected_version=self._version(service, mid))
+                                     expected_version=self._version(service, mid), decider=FOUNDER)
         service.close()
         _run(self._rt(), organs, key="again")
         self.assertEqual(len(gov.authorizations), 1)
@@ -482,7 +484,7 @@ class ExternalChannelMintsTheArtifact(unittest.TestCase):
         mid, _, _ = self._park("advance")
         service = self._service()
         service.approve_mission_gate(mid, reason="ok", idempotency_key="idem-advance",
-                                     expected_version=self._version(service, mid))
+                                     expected_version=self._version(service, mid), decider=FOUNDER)
         service.close()
 
         artifact = governance_approval_from(self._rt().store.list_approvals(mid)[0])
@@ -548,7 +550,7 @@ class AuthorizationFailsClosed(unittest.TestCase):
         service = MissionService(self.db, signer=FounderApprovalSigner(HARNESS_SIGNING_KEY))
         service.approve_mission_gate(
             mid, reason="ok", idempotency_key="idem-" + key,
-            expected_version=service.get_mission(mid)["envelope"]["version"],
+            expected_version=service.get_mission(mid)["envelope"]["version"], decider=FOUNDER
         )
         service.close()
         return mid, organs, gov
@@ -575,7 +577,7 @@ class AuthorizationFailsClosed(unittest.TestCase):
         service = MissionService(self.db, signer=FounderApprovalSigner(HARNESS_SIGNING_KEY))
         service.approve_mission_gate(
             mid, reason="ok", idempotency_key="idem-noauthz",
-            expected_version=service.get_mission(mid)["envelope"]["version"],
+            expected_version=service.get_mission(mid)["envelope"]["version"], decider=FOUNDER
         )
         service.close()
 

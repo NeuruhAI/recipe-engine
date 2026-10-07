@@ -102,6 +102,18 @@
       },
       "CreateMissionBody": {
         "properties": {
+          "continuation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continuation"
+          },
           "done_criteria": {
             "default": "",
             "maxLength": 4000,
@@ -221,6 +233,30 @@
             "title": "Blocked Actions",
             "type": "array"
           },
+          "completion": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion"
+          },
+          "continuation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continuation"
+          },
           "evidence_refs": {
             "items": {
               "type": "string"
@@ -230,6 +266,18 @@
           },
           "freshness": {
             "$ref": "#/components/schemas/FreshnessBody"
+          },
+          "lineage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage"
           },
           "mission_id": {
             "title": "Mission Id",
@@ -755,6 +803,7 @@
     },
     "/v1/missions/{mission_id}/approve": {
       "post": {
+        "description": "Founder-only (G-1): requires the founder credential via neuruh-approve. The operator token is refused with 403 OPERATOR_TOKEN_NOT_FOUNDER. decided_by is the authenticated founder identity.",
         "operationId": "approve_v1_missions__mission_id__approve_post",
         "parameters": [
           {
@@ -833,6 +882,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Refused: founder credential required. error code is one of FOUNDER_AUTH_NOT_CONFIGURED, FOUNDER_TOKEN_INVALID, FOUNDER_TOKEN_MISSING, OPERATOR_TOKEN_NOT_FOUNDER"
           },
           "422": {
             "content": {
@@ -1108,8 +1160,106 @@
         "summary": "Events Stream"
       }
     },
+    "/v1/missions/{mission_id}/execution-outcomes": {
+      "post": {
+        "operationId": "record_execution_outcome_v1_missions__mission_id__execution_outcomes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mission_id",
+            "required": true,
+            "schema": {
+              "title": "Mission Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-expected-version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Execution Outcome"
+      }
+    },
     "/v1/missions/{mission_id}/gate/approve": {
       "post": {
+        "description": "Founder-only (G-1): requires the founder credential via neuruh-approve --gate. The operator token is refused with 403 OPERATOR_TOKEN_NOT_FOUNDER. Only a founder-authenticated ALLOW is signed into the Governance artifact.",
         "operationId": "approve_gate_v1_missions__mission_id__gate_approve_post",
         "parameters": [
           {
@@ -1189,6 +1339,9 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Refused: founder credential required. error code is one of FOUNDER_AUTH_NOT_CONFIGURED, FOUNDER_TOKEN_INVALID, FOUNDER_TOKEN_MISSING, OPERATOR_TOKEN_NOT_FOUNDER"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1205,6 +1358,7 @@
     },
     "/v1/missions/{mission_id}/gate/reject": {
       "post": {
+        "description": "Operator or founder. decided_by is the authenticated identity ('operator' for the operator token). A DENY is never signed.",
         "operationId": "reject_gate_v1_missions__mission_id__gate_reject_post",
         "parameters": [
           {
@@ -1574,6 +1728,103 @@
         "summary": "Receipts"
       }
     },
+    "/v1/missions/{mission_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_v1_missions__mission_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mission_id",
+            "required": true,
+            "schema": {
+              "title": "Mission Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-expected-version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Expected-Version"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconcile"
+      }
+    },
     "/v1/missions/{mission_id}/recover": {
       "post": {
         "operationId": "recover_v1_missions__mission_id__recover_post",
@@ -1661,6 +1912,7 @@
     },
     "/v1/missions/{mission_id}/reject": {
       "post": {
+        "description": "Operator or founder. decided_by is the authenticated identity ('operator' for the operator token).",
         "operationId": "reject_v1_missions__mission_id__reject_post",
         "parameters": [
           {

@@ -20,6 +20,8 @@ autonomous-governance-core (tests/approval-promotion-seams.test.mjs).
 
 from __future__ import annotations
 
+from tests.founder_runtime.deciders import FOUNDER
+
 import hashlib
 import hmac
 import json
@@ -344,7 +346,7 @@ def test_founder_gate_approval_is_presented_to_governance_not_spent_locally(tmp_
     mid = res["envelope"]["mission_id"]
     assert res["envelope"]["state"] == "AWAITING_APPROVAL"
     version = svc.get_mission(mid)["envelope"]["version"]
-    human = svc.approve_mission_gate(mid, reason="ok", idempotency_key="lp-approve", expected_version=version)
+    human = svc.approve_mission_gate(mid, reason="ok", idempotency_key="lp-approve", expected_version=version, decider=FOUNDER)
     assert human["approval"]["decided_by"] == "jeramie"
     assert human["envelope"]["state"] == "AWAITING_APPROVAL", "a gate ALLOW records authority; it never advances"
     signed = [r for r in human["approval"]["evidence_refs"] if r.startswith("gov.founder.approval.v1=")]
@@ -373,7 +375,7 @@ def test_unsigned_human_approval_is_not_authority(tmp_path):
     res = _create(svc, "edit the README draft locally", key="us-1")
     mid = res["envelope"]["mission_id"]
     version = svc.get_mission(mid)["envelope"]["version"]
-    svc.approve_mission_gate(mid, reason="ok", idempotency_key="us-approve", expected_version=version)
+    svc.approve_mission_gate(mid, reason="ok", idempotency_key="us-approve", expected_version=version, decider=FOUNDER)
     version = svc.get_mission(mid)["envelope"]["version"]
     out = svc.resolve_authority(mid, idempotency_key="us-resolve", expected_version=version)
     assert out["authority_state"] == resolver.FOUNDER_REQUIRED
