@@ -23,8 +23,19 @@ cd "$REPO"
 
 RUN_ID="daily-$(date -u +%Y%m%dT%H%M%SZ)"
 RECEIPTS="$REPO/data/receipts.log"
-ENGINE_URL="$(grep -E '^LANDOS_ENGINE_URL=' .env | cut -d= -f2-)"
-ENGINE_URL="${ENGINE_URL:-http://127.0.0.1:8400}"
+ENGINE_URL="$(grep -E '^LANDOS_ENGINE_URL=' .env | cut -d= -f2- || true)"
+# :8400 is galaxy-live on this host. An unset or :8400 URL is a false-healthy
+# engine check, not a LandOS check. Fail loudly; do not guess.
+if [ -z "$ENGINE_URL" ]; then
+    echo "FATAL: LANDOS_ENGINE_URL is unset. Refusing to default to :8400 (galaxy-live)." >&2
+    exit 1
+fi
+case "$ENGINE_URL" in
+    *://127.0.0.1:8400*|*://localhost:8400*)
+        echo "FATAL: LANDOS_ENGINE_URL=$ENGINE_URL is galaxy-live, not LandOS (:8410)." >&2
+        exit 1
+        ;;
+esac
 
 mkdir -p "$REPO/data"
 
